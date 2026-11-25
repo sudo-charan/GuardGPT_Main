@@ -7,48 +7,7 @@ second MCP server, and one trace id follows the request through every stage.
 
 ## Architecture
 
-```text
-User / CLI (main.py)
-      |
-      v
-MCP client (agent/mcp_client.py)  ->  MCP server (mcp_server/server.py)   <- backbone
-      |                                 registry, router, policy hooks
-      v
-Layer 1 Guard - input check (pre-generation)          core/layers/layer1_guard.py
-      |   injection / jailbreak / harm / coercion patterns, PII + secrets, self-harm assessor
-      |   -> SAFE | FLAG | UNSAFE + findings + risk score
-      v
-Layer 2 Intent Intelligence                           core/layers/layer2_intent.py
-      |   ensemble: trained MiniLM (BERT) head + curated anchors + FAISS kNN + Layer 1 evidence
-      |   -> label in {safe, prompt_injection, jailbreak, harmful_instructions,
-      |               manipulation, self_harm_risk} + confidence + distribution
-      |   + topic (what it is about) and context / task understanding
-      |     (task, follow-up, topic shift, session signal); informational only
-      v
-JEV model (intent + confidence [+ prompt] -> verdict)  core/layers/jev.py
-      |   builtin rules on intent + confidence, or your fine-tuned JEV checkpoint
-      |   (JEV_STYLE_MODE=finetuned), which also reads the prompt; the rule verdict is a floor
-      v
-Layer 3 Guard / Policy Engine                         core/layers/layer3_policy.py
-      |   ALLOW -> agent      FLAG -> review queue (priority + escalation)
-      |   BLOCK -> model-written refusal
-      |   self-harm -> supportive reply (explicit crisis = fixed vetted reply)
-      |   emotional distress -> normal answer in a caring "wellbeing" mode
-      v
-LangGraph agent (agent/graph.py)
-      |   route -> select_tool -> execute_tool
-      |   tools run on the tools MCP server (mcp_server/tools_server.py):
-      |     redact_text -> ollama_generate | ollama_support   (Ollama / Llama 3.2)
-      v
-Layer 1 Guard - output check (post-generation)
-      |   deterministic checks + model reviewer (ollama_review)
-      |   SAFE -> release   FLAG -> review   UNSAFE -> regenerate (2 attempts in total) then block
-      |   support replies: never held for review; if not released, a fixed fallback is sent
-      v
-Response
-
-Cross-cutting: logs/ - trace (one event per stage, same trace_id), audit, metrics, alerts.
-```
+![GuardGPT architecture diagram](ArchitectureDiagram.png)
 
 Layers talk through typed contracts in `core/layers/contracts.py`
 (`GuardVerdict`, `IntentResult`, `JEVResult`, `PolicyDecision`).
@@ -182,7 +141,7 @@ ids and labels; the evaluation job and trimming write to `logs/` (`guardgpt_feed
 | Mode | What it does |
 |---|---|
 | `builtin` (default) | Rules over the Layer 2 label, confidence and Layer 1 findings. |
-| `finetuned` | Runs your fine-tuned JEV checkpoint on the prompt, and combines its verdict with the Layer 2 intent + confidence. The builtin verdict is kept as a floor, so inside JEV the model can only make a verdict stricter (Layer 3 may still relax it, see [Known issues](#known-issues)). |
+| `finetuned` | Runs your fine-tuned JEV checkpoint on the prompt, and combines its verdict with the Layer 2 intent + confidence. The builtin verdict is kept as a floor, so inside JEV the model can only make a verdict stricter (Layer 3 may still relax it). |
 | `server` / `auto` | External Jev-Style HTTP server (`auto` falls back to builtin). |
 
 The builtin rules also use the session: after two or more blocked turns in the last
@@ -338,41 +297,6 @@ project archive. Defender may quarantine them again. Allow the files or exclude 
 protection. The chat still runs without them, but Layer 1 and Layer 2 lose their dataset
 evidence.
 
-## Known issues
-
-Open problems as of 2026-11-25. They are not fixed yet.
-
-**Safety and privacy**
-
-- A support reply written by the model is not checked for refusals or phone numbers. In
-  testing, one told the user it could not continue the conversation, and replies quoted
-  country-specific helplines without knowing where the user was.
-- In `finetuned` mode, Layer 3 can turn a JEV `BLOCK` into `ALLOW` when Layer 2 also sees
-  a mild self-harm signal.
-- A defensive word anywhere in a prompt (for example "avoid" or "prevent") switches off
-  several Layer 1 harm detectors. Later layers may still catch the prompt.
-- Slightly reworded injection phrases can miss the Layer 1 patterns.
-- Over-long input, and prompts that fail during Layer 1, are written to the prompt and
-  complete logs **without redaction**.
-- Redaction covers only some phone formats: Indian formats such as 10 unbroken digits or
-  `+91 98765 43210` are missed, and Aadhaar numbers are not covered.
-
-**Wrong decisions**
-
-- After an earlier risk in the session, the word "tonight" or "plan" alone triggers the
-  fixed crisis reply (for example "help me plan my studies").
-- Supportive turns count as blocked turns, so after two of them in the last three turns, a
-  harmless message that would only be flagged is refused.
-- Ordinary loneliness or stress can be sent to the support route, which then marks the
-  session as in crisis.
-
-**Answers withheld**
-
-- The output reviewer accepts at most 6,000 bytes of prompt plus answer, so long answers
-  are held for review.
-- A safe answer that opens with "I can't..." is held, and one containing an example email
-  address is blocked.
-
 ## Known limitations
 
 - The trained intent head is weak on its own (about 58% on the project's evaluation
@@ -387,8 +311,9 @@ Open problems as of 2026-11-25. They are not fixed yet.
 ## Logs
 
 See `logs/README.md`. Request prompt text is stored in `guardgpt_prompt.jsonl` and
-`guardgpt_complete.jsonl` (and shown in the dashboard). It is normally redacted, with the
-exception listed under [Known issues](#known-issues). Treat `logs/` as sensitive runtime
-data.
+`guardgpt_complete.jsonl` (and shown in the dashboard). It is normally redacted, but over-long
+input and prompts that fail during Layer 1 are written without redaction. Treat `logs/` as
+sensitive runtime data.
+
 For a plain-language explanation of how everything works and what each file does, see
 `PROJECT_GUIDE.md`.
