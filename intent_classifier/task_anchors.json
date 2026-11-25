@@ -1,0 +1,45 @@
+{
+  "_about": "Reference examples for the TASK a message asks for (what the user wants done), used by Layer 2 context understanding. Informational only: it never changes an allow/flag/block decision. Add a line to correct a recurring wrong task; no retraining needed.",
+  "question": [
+    "What is photosynthesis?", "Why is the sky blue?", "Who invented the telephone?",
+    "What is the capital of Japan?", "Can you explain how vaccines work?", "What does inflation mean?",
+    "When did the Roman empire fall?", "What is the difference between a virus and a bacterium?",
+    "Is it true that we only use ten percent of our brains?", "How does a refrigerator work?"
+  ],
+  "how_to": [
+    "How do I reset my password?", "How can I learn to play guitar?", "What are the steps to install Python?",
+    "How do I change a flat tyre?", "How do I set up a home wifi network?", "How can I start saving money?",
+    "Show me how to bake bread.", "Walk me through setting up two factor authentication."
+  ],
+  "creation": [
+    "Write a poem about the ocean.", "Draft an email asking for a day off.", "Create a slogan for my coffee shop.",
+    "Write a short story about a lost robot.", "Compose a birthday message for my friend.",
+    "Generate ideas for a school science project.", "Write a speech for a wedding.", "Make a study plan for me."
+  ],
+  "code": [
+    "Write a Python function that reverses a string.", "Why does my code throw a KeyError?",
+    "Fix this SQL query.", "Implement binary search in Java.", "Explain this regular expression.",
+    "How do I read a CSV file with pandas?", "Debug this segmentation fault.", "Convert this script from Python to Go."
+  ],
+  "transformation": [
+    "Summarize this article in three bullet points.", "Translate the following text into French.",
+    "Rewrite this paragraph to sound more professional.", "Proofread this essay for mistakes.",
+    "Shorten this text to one paragraph.", "Here is the document, give me the key points.",
+    "TL;DR this for me.", "Extract the names from the text below."
+  ],
+  "advice": [
+    "Should I accept this job offer?", "What should I do about my noisy neighbour?",
+    "Recommend a good laptop for students.", "Suggest a gift for my mother.",
+    "Which is better, renting or buying a house?", "What do you think I should study?",
+    "Give me tips for a job interview.", "Is it a good idea to learn Rust first?"
+  ],
+  "chat": [
+    "hi", "hello there", "good morning", "thank you!", "how are you?", "what did we talk about so far?",
+    "can you give me some examples?", "continue", "ok, got it", "who are you?"
+  ],
+  "personal_support": [
+    "I feel so lonely lately.", "I am really stressed about my exams.", "I need someone to talk to.",
+    "I have been feeling down and tired of everything.", "My friend is going through a hard time.",
+    "I am anxious about the future.", "Nobody understands me.", "I do not know what to do with my life."
+  ]
+}

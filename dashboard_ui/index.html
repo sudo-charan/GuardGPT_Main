@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuardGPT Dashboard</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #1c2430; --muted: #6b7686; --line: #e3e7ee;
+    --accent: #2f6fed; --green: #1f9d57; --amber: #c78100; --red: #d33a3a; --blue: #2f6fed; --gray: #6b7686;
+    --green-bg: #e6f6ec; --amber-bg: #fff3d6; --red-bg: #fde8e8; --blue-bg: #e7efff; --gray-bg: #eceff3;
+    --shadow: 0 1px 2px rgba(20,30,50,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161c; --panel: #1a2029; --ink: #e6eaf0; --muted: #93a0b3; --line: #29313d;
+    --accent: #6b9bff; --green: #4cc38a; --amber: #e6b04a; --red: #f07a7a; --blue: #6b9bff; --gray: #93a0b3;
+    --green-bg: #15301f; --amber-bg: #3a2f14; --red-bg: #3a1c1c; --blue-bg: #1a2a4a; --gray-bg: #232a35; --shadow: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --bg: #12161c; --panel: #1a2029; --ink: #e6eaf0; --muted: #93a0b3; --line: #29313d;
+      --accent: #6b9bff; --green: #4cc38a; --amber: #e6b04a; --red: #f07a7a; --blue: #6b9bff; --gray: #93a0b3;
+      --green-bg: #15301f; --amber-bg: #3a2f14; --red-bg: #3a1c1c; --blue-bg: #1a2a4a; --gray-bg: #232a35; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--gray-bg); color: var(--gray); white-space: nowrap; }
+  .pill.ok { background: var(--green-bg); color: var(--green); } .pill.bad { background: var(--red-bg); color: var(--red); }
+  .pill.btn { cursor: pointer; border: 0; font: inherit; font-size: 12px; }
+  nav { display: flex; gap: 2px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav button { background: none; border: 0; padding: 11px 13px; font: inherit; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  nav button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  main { max-width: 1180px; margin: 0 auto; padding: 18px; }
+  section { display: none; } section.active { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .b-allow, .b-safe, .b-correct, .b-approved, .b-done { background: var(--green-bg); color: var(--green); }
+  .b-flag, .b-review, .b-high, .b-pending, .b-running { background: var(--amber-bg); color: var(--amber); }
+  .b-block, .b-unsafe, .b-error, .b-invalid_input, .b-urgent, .b-wrong, .b-rejected, .b-failed { background: var(--red-bg); color: var(--red); }
+  .b-support { background: var(--blue-bg); color: var(--blue); }
+  .b-other, .b-normal { background: var(--gray-bg); color: var(--gray); }
+  .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 6px; background: var(--gray-bg); color: var(--muted); margin: 0 6px 4px 0; }
+  button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 5px 11px; font: inherit; cursor: pointer; }
+  button.ghost:hover { color: var(--ink); }
+  button.danger { color: var(--red); border-color: var(--red); }
+  input[type=text], select, textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .stat { padding: 12px 15px; } .stat .n { font-size: 25px; font-weight: 650; } .stat .l { color: var(--muted); font-size: 12.5px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 800px) { .two { grid-template-columns: 1fr; } main { padding: 12px; } }
+  .box { padding: 13px 15px; margin-bottom: 14px; } .box h3 { margin: 0 0 9px; font-size: 12.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .two .box { margin-bottom: 0; }
+  .bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12.5px; }
+  .bar .name { width: 130px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { flex: 1; height: 8px; background: var(--gray-bg); border-radius: 4px; }
+  .bar .fill { display: block; height: 100%; border-radius: 4px; background: var(--accent); } .bar .num { width: 46px; text-align: right; color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); }
+  .empty { color: var(--muted); padding: 22px; text-align: center; }
+  .alert { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 8px; background: var(--red-bg); color: var(--red); margin-bottom: 8px; }
+  .alert button { margin-left: auto; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Consolas, monospace; }
+  .event { padding: 9px 14px; border-bottom: 1px solid var(--line); } .event b { display: inline-block; min-width: 130px; }
+  a { color: var(--accent); } .event a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .muted { color: var(--muted); } .small { font-size: 12px; } .right { text-align: right; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60; max-width: 90vw; }
+  .toast.show { opacity: .96; }
+  .ptext { transition: filter .15s; } body.private .ptext { filter: blur(5px); } body.private .ptext:hover { filter: none; }
+  .skel { height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--gray-bg), var(--line), var(--gray-bg)); background-size: 200% 100%; animation: sh 1.2s infinite; margin: 10px 14px; }
+  @keyframes sh { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  /* drawer */
+  #veil { position: fixed; inset: 0; background: rgba(10,15,25,.45); display: none; z-index: 40; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 100vw); background: var(--bg); border-left: 1px solid var(--line); z-index: 50; transform: translateX(100%); transition: transform .18s; overflow-y: auto; }
+  body.drawer-open #veil { display: block; } body.drawer-open #drawer { transform: none; }
+  #drawer .head { position: sticky; top: 0; display: flex; gap: 10px; align-items: center; padding: 11px 16px; background: var(--panel); border-bottom: 1px solid var(--line); z-index: 2; }
+  #drawer .body { padding: 14px 16px 40px; }
+  .promptbox { padding: 11px 13px; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; }
+  .pipe { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px; }
+  @media (max-width: 640px) { .pipe { grid-template-columns: 1fr 1fr; } }
+  .stage { padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); border-top-width: 3px; }
+  .stage .t { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; } .stage .v { font-weight: 650; margin: 2px 0; } .stage .s { font-size: 12px; color: var(--muted); word-break: break-word; }
+  .stage.ok { border-top-color: var(--green); } .stage.warn { border-top-color: var(--amber); } .stage.bad { border-top-color: var(--red); } .stage.off { border-top-color: var(--line); opacity: .7; }
+  .water { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12.5px; }
+  .water .name { width: 120px; color: var(--muted); } .water .track { flex: 1; height: 10px; background: var(--gray-bg); border-radius: 4px; position: relative; }
+  .water .fill { position: absolute; top: 0; height: 100%; border-radius: 4px; background: var(--accent); } .water .num { width: 64px; text-align: right; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; font-size: 13px; } .kv div:nth-child(odd) { color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; color: var(--muted); } .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  svg text { fill: var(--muted); font-size: 10px; }
+  .conf td { text-align: center; } .conf td.diag { font-weight: 700; } .conf th:first-child { text-align: left; }
+  details > summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>GuardGPT Dashboard</h1>
+  <div class="pills" id="pills"><span class="pill">loading&hellip;</span></div>
+  <div class="pills">
+    <button class="pill btn" id="live" title="Live updates (click to enable desktop alerts)">live: off</button>
+    <button class="pill btn" id="privacy" title="Blur prompt text (hover to reveal)">Hide text</button>
+    <button class="pill btn" id="theme" title="Switch theme">Theme: auto</button>
+  </div>
+</header>
+<nav id="tabs">
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="requests">Requests</button>
+  <button data-tab="sessions">Sessions</button>
+  <button data-tab="reviews">Reviews</button>
+  <button data-tab="feedback">Feedback</button>
+  <button data-tab="evaluation">Evaluation</button>
+  <button data-tab="system">System</button>
+  <button data-tab="traces">Traces</button>
+</nav>
+<main>
+
+<section id="tab-overview" class="active">
+  <p class="hint">Live view of <b>logs/</b>. Chat in the CLI (<b>python main.py --chat</b>) and each request appears here. Click any request for the full breakdown. Shortcuts: 1-8 switch tabs, / search, r refresh, Esc close.</p>
+  <div id="alerts"></div>
+  <div class="grid" id="stats"></div>
+  <div class="card box"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">Traffic over time</h3>
+    <select id="bucket"><option value="hour">per hour</option><option value="day">per day</option></select>
+    <span class="legend" style="margin-left:auto"><span><i style="background:var(--green)"></i>allow</span><span><i style="background:var(--amber)"></i>flag</span><span><i style="background:var(--red)"></i>block</span><span><i style="background:var(--blue)"></i>support</span><span><i style="background:var(--muted)"></i>avg latency</span></span></div>
+    <div id="trend"></div></div>
+  <div class="two">
+    <div class="card box"><h3>Safety intent (last 100)</h3><div id="intents"></div></div>
+    <div class="card box"><h3>Topics (last 100)</h3><div id="topics"></div></div>
+  </div>
+  <div class="card box"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">Recent requests</h3>
+    <button class="ghost" id="report" style="margin-left:auto">Summary report</button></div><div class="scroll" id="recent"></div></div>
+</section>
+
+<section id="tab-requests">
+  <div class="row">
+    <input type="text" id="f-q" placeholder="Search prompt text (/)" style="width:240px">
+    <select id="f-action"><option value="">any decision</option><option>ALLOW</option><option>FLAG</option><option>BLOCK</option></select>
+    <select id="f-intent"><option value="">any safety intent</option></select>
+    <select id="f-topic"><option value="">any topic</option></select>
+    <input type="text" id="f-session" placeholder="Session id" style="width:130px">
+    <button class="ghost" id="f-clear">Clear</button>
+    <button class="ghost" id="f-export" style="margin-left:auto">Export CSV</button>
+  </div>
+  <div class="card"><div class="scroll" id="reqlist"></div></div>
+  <div class="row" style="margin-top:12px"><button class="ghost" id="prev">Previous</button><button class="ghost" id="next">Next</button><span class="muted small" id="pageinfo"></span></div>
+</section>
+
+<section id="tab-sessions">
+  <p class="hint">One row per chat session. Click a session to see its conversation as a timeline with the session risk.</p>
+  <div class="card"><div class="scroll" id="sesslist"></div></div>
+  <div class="card box" id="sesstl" style="margin-top:14px;display:none"></div>
+</section>
+
+<section id="tab-reviews">
+  <div class="row">
+    <label><input type="checkbox" id="showall"> Show resolved</label>
+    <select id="rv-prio"><option value="">any priority</option><option>urgent</option><option>high</option><option>normal</option></select>
+    <input type="text" id="reviewer" placeholder="Reviewer name" style="width:150px">
+    <input type="text" id="rv-note" placeholder="Note (optional)" style="width:200px">
+    <button class="ghost" id="rv-approve">Approve selected</button><button class="ghost danger" id="rv-reject">Reject selected</button>
+    <button class="ghost" id="reload-reviews" style="margin-left:auto">Refresh</button><button class="ghost" id="rv-export">Export CSV</button>
+  </div>
+  <div class="card"><div class="scroll" id="reviewlist"></div></div>
+</section>
+
+<section id="tab-feedback">
+  <p class="hint">Open any request and mark its safety intent as correct or wrong. Wrong ones can be exported as ready-to-paste lines for <b>intent_anchors.json</b>, a no-retraining way to improve Layer 2.</p>
+  <div class="row"><button class="primary" id="fb-export">Export anchor lines</button><span class="muted small" id="fb-count"></span></div>
+  <div class="card box" id="fb-out" style="display:none"></div>
+  <div class="card"><div class="scroll" id="fblist"></div></div>
+</section>
+
+<section id="tab-evaluation">
+  <p class="hint">Runs <b>evaluate_intent.py</b> on the labelled sample prompts as a separate job and compares the intent head, the anchors, the ensemble and the JEV model. The quick run uses rules only; the full run also loads the fine-tuned JEV (several minutes).</p>
+  <div class="row"><button class="primary" id="ev-quick">Run quick (rules only)</button><button class="ghost" id="ev-full">Run full (with fine-tuned JEV)</button><span id="ev-state" class="muted small"></span></div>
+  <div id="ev-out"></div>
+</section>
+
+<section id="tab-system">
+  <div class="row"><button class="ghost" id="sys-refresh">Refresh</button></div>
+  <div id="sysbox"></div>
+</section>
+
+<section id="tab-traces">
+  <div class="row"><input type="text" id="traceid" placeholder="Trace ID (first 8+ characters)" style="width:340px"><button class="primary" id="loadtrace">Load</button></div>
+  <div class="card" id="tracebox"><div class="empty">Enter a trace ID, or click a request on the Overview tab.</div></div>
+</section>
+
+</main>
+<div id="veil"></div>
+<aside id="drawer" aria-label="Request details"><div class="head"><b id="dr-title">Request</b><span id="dr-badge"></span><button class="ghost" id="dr-close" style="margin-left:auto">Close (Esc)</button></div><div class="body" id="dr-body"></div></aside>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = "__DASHBOARD_TOKEN__";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const LABELS = ["safe", "prompt_injection", "jailbreak", "harmful_instructions", "manipulation", "self_harm_risk"];
+const TOPICS = ["greeting", "coding", "cybersecurity", "technology", "education", "math", "health_wellbeing", "emotional_support", "writing", "summarization", "daily_life", "conversation", "general"];
+const TABS = ["overview", "requests", "sessions", "reviews", "feedback", "evaluation", "system", "traces"];
+let lastRequest = null, currentTab = "overview", statusPills = [], live = false, reqOffset = 0, reqTotal = 0, reqLimit = 25, evalTimer = null, pendingSession = null;
+
+/* ---------------- helpers ---------------- */
+function toast(text, ms) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), ms || 2600); }
+async function rawFetch(path, options = {}) {
+  const res = await fetch(path, { ...options, headers: { "x-dashboard-token": TOKEN, "content-type": "application/json", ...(options.headers || {}) } });
+  if (!res.ok) { let m = "Request failed (" + res.status + ")"; try { m = (await res.json()).error || m; } catch (e) {} throw new Error(m); }
+  return res;
+}
+const api = async (path, options) => (await rawFetch(path, options)).json();
+const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
+async function download(path, name) { const blob = await (await rawFetch(path)).blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+const qs = (o) => Object.entries(o).filter(([, v]) => v !== "" && v != null).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+const badgeClass = (v) => "b-" + String(v || "other").toLowerCase();
+const badge = (text, cls) => '<span class="badge ' + (cls || badgeClass(text)) + '">' + esc(text) + "</span>";
+const decision = (action, status) => String(status || "").toUpperCase() === "SUPPORT" ? badge("SUPPORT", "b-support") : badge(action || "?", badgeClass(action));
+const hhmmss = (iso) => (iso || "").slice(11, 19);
+const dt = (iso) => (iso || "").slice(0, 19).replace("T", " ");
+const pctv = (v) => v == null ? "-" : (v <= 1 ? Math.round(v * 1000) / 10 : v) + "%";
+const sec = (ms) => ms == null ? "-" : (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + " s";
+function ago(iso) { if (!iso) return "no requests yet"; const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000)); if (s < 60) return s + " s ago"; if (s < 3600) return Math.round(s / 60) + " min ago"; if (s < 86400) return Math.round(s / 3600) + " h ago"; return Math.round(s / 86400) + " d ago"; }
+function age(s) { if (s == null) return "-"; if (s < 90) return s + " s"; if (s < 5400) return Math.round(s / 60) + " min"; if (s < 129600) return (s / 3600).toFixed(1) + " h"; return Math.round(s / 86400) + " d"; }
+const skeleton = (el, n) => { $(el).innerHTML = '<div class="skel"></div>'.repeat(n || 3); };
+const ptext = (t) => '<span class="ptext">' + esc(t) + "</span>";
+function bars(obj, el) {
+  const e = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]); const max = e.length ? e[0][1] : 1;
+  $(el).innerHTML = e.length ? e.map(([k, v]) => '<div class="bar"><span class="name">' + esc(k) + '</span><span class="track"><span class="fill" style="width:' + Math.round(v / max * 100) + '%"></span></span><span class="num">' + v + "</span></div>").join("") : '<div class="empty">No data yet</div>';
+}
+
+/* ---------------- theme, privacy ---------------- */
+function applyTheme() { const t = localStorage.getItem("theme") || "auto"; if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); $("theme").textContent = "Theme: " + t; }
+$("theme").onclick = () => { const order = ["auto", "light", "dark"]; const cur = localStorage.getItem("theme") || "auto"; localStorage.setItem("theme", order[(order.indexOf(cur) + 1) % 3]); applyTheme(); };
+function applyPrivacy() { const on = localStorage.getItem("private") === "1"; document.body.classList.toggle("private", on); $("privacy").textContent = on ? "Text hidden" : "Hide text"; $("privacy").classList.toggle("ok", on); }
+$("privacy").onclick = () => { localStorage.setItem("private", localStorage.getItem("private") === "1" ? "0" : "1"); applyPrivacy(); };
+
+/* ---------------- tabs ---------------- */
+function show(tab) {
+  currentTab = tab;
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll("main section").forEach((s) => s.classList.toggle("active", s.id === "tab-" + tab));
+  if (location.hash.slice(1) !== tab) history.replaceState(null, "", "#" + tab);
+  refresh();
+}
+$("tabs").addEventListener("click", (e) => { const t = e.target.dataset.tab; if (t) show(t); });
+async function refresh() {
+  try {
+    if (currentTab === "overview") await loadOverview();
+    else if (currentTab === "requests") await loadRequests();
+    else if (currentTab === "sessions") await loadSessions();
+    else if (currentTab === "reviews") await loadReviews();
+    else if (currentTab === "feedback") await loadFeedback();
+    else if (currentTab === "evaluation") await loadEval();
+    else if (currentTab === "system") await loadSystem();
+  } catch (e) { toast(e.message); }
+}
+
+/* ---------------- status pills ---------------- */
+function drawPills() { $("pills").innerHTML = statusPills.concat([["last request " + ago(lastRequest), ""]]).map((p) => '<span class="pill ' + p[1] + '">' + esc(p[0]) + "</span>").join(""); }
+async function loadStatus() {
+  try {
+    const s = await api("/api/status");
+    if (s.error) statusPills = [["status unavailable", "bad"]];
+    else statusPills = [
+      ["Ollama " + (s.ollama.reachable ? s.ollama.model : "down"), s.ollama.reachable ? "ok" : "bad"],
+      ["Intent model " + (s.intent_model ? "ready" : "missing"), s.intent_model ? "ok" : "bad"],
+      ["JEV: " + s.jev.mode + (s.jev.ok ? "" : " (problem)"), s.jev.ok ? "ok" : "bad"],
+      ["Data " + (s.data_files ? "ok" : "missing"), s.data_files ? "ok" : "bad"]];
+  } catch (e) { statusPills = [[e.message, "bad"]]; }
+  try { const r = await api("/api/recent?limit=1"); if (r.entries.length) lastRequest = r.entries[0].time; } catch (e) {}
+  drawPills();
+}
+
+/* ---------------- overview ---------------- */
+function trendSvg(points) {
+  if (!points.length) return '<div class="empty">No traffic yet.</div>';
+  const W = 1000, H = 170, L = 30, B = 22, T = 8, n = points.length, bw = (W - L) / n;
+  const max = Math.max(1, ...points.map((p) => p.allow + p.flag + p.block + p.support + p.error));
+  const lat = Math.max(1, ...points.map((p) => p.avg_ms || 0));
+  const colors = [["allow", "var(--green)"], ["flag", "var(--amber)"], ["block", "var(--red)"], ["support", "var(--blue)"], ["error", "var(--gray)"]];
+  let out = '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" role="img" aria-label="Traffic over time">';
+  out += '<line x1="' + L + '" y1="' + (H - B) + '" x2="' + W + '" y2="' + (H - B) + '" stroke="var(--line)"/>';
+  out += '<text x="2" y="' + (T + 8) + '">' + max + '</text><text x="2" y="' + (H - B) + '">0</text>';
+  let line = [];
+  points.forEach((p, i) => {
+    let y = H - B; const x = L + i * bw;
+    colors.forEach(([k, c]) => { const h = (p[k] || 0) / max * (H - B - T); if (h > 0) { y -= h; out += '<rect x="' + (x + 1.5) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - 3).toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + c + '" rx="2"><title>' + esc(p.t.slice(5, 16).replace("T", " ") + "  " + k + ": " + p[k]) + "</title></rect>"; } });
+    if (p.avg_ms != null) line.push((x + bw / 2).toFixed(1) + "," + (H - B - p.avg_ms / lat * (H - B - T)).toFixed(1));
+    if (n <= 14 || i % Math.ceil(n / 12) === 0) out += '<text x="' + (x + 2) + '" y="' + (H - 6) + '">' + esc(p.t.slice(n > 0 && p.t.length > 10 ? 5 : 0, 10) + (points[0].t.slice(11, 13) !== undefined && $("bucket").value === "hour" ? " " + p.t.slice(11, 13) + "h" : "")) + "</text>";
+  });
+  if (line.length > 1) out += '<polyline points="' + line.join(" ") + '" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-dasharray="4 3"/>';
+  return out + "</svg>";
+}
+async function loadTrend() { const t = await api("/api/timeseries?bucket=" + $("bucket").value); $("trend").innerHTML = trendSvg(t.points); }
+$("bucket").onchange = () => loadTrend().catch((e) => toast(e.message));
+function recentTable(entries) {
+  const rows = entries.map((e) => '<tr class="click" data-trace="' + esc(e.trace_id) + '"><td>' + esc(hhmmss(e.time)) + "</td><td>" + ptext(e.prompt) + "</td><td>" + esc(e.topic || "-") + "</td><td>" + esc(e.intent || "-") + "</td><td>" + decision(e.action, e.status) + "</td></tr>").join("");
+  return rows ? "<table><tr><th>Time (UTC)</th><th>Prompt</th><th>Topic</th><th>Safety</th><th>Decision</th></tr>" + rows + "</table>" : '<div class="empty">No requests yet. Start a chat with <b>python main.py --chat</b>.</div>';
+}
+async function loadOverview() {
+  const [o, r] = await Promise.all([api("/api/overview"), api("/api/recent?limit=12")]);
+  const c = o.counters || {}; lastRequest = o.last_request; drawPills();
+  $("alerts").innerHTML = (o.alerts || []).map((a) => '<div class="alert">Alert: ' + esc(a.replace(/_/g, " ")) + '<button class="ghost" data-ack="1">Acknowledge</button></div>').join("");
+  const stat = (n, l) => '<div class="card stat"><div class="n">' + esc(n ?? 0) + '</div><div class="l">' + esc(l) + "</div></div>";
+  $("stats").innerHTML = stat(c.requests, "requests") + stat(c["action:allow"], "allowed") + stat(c["action:flag"], "flagged") + stat(c["action:block"], "blocked") + stat(c["status:support"], "support replies") + stat(c.escalations, "escalations") + stat(c.errors, "errors") + stat(o.latency_ms.median != null ? sec(o.latency_ms.median) : "-", "median latency");
+  bars(o.intents, "intents"); bars(o.topics, "topics"); $("recent").innerHTML = recentTable(r.entries);
+  loadTrend().catch(() => {});
+}
+$("alerts").addEventListener("click", async (e) => { if (e.target.dataset.ack) { await post("/api/alerts/ack"); toast("Alerts acknowledged"); loadOverview(); } });
+$("recent").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-trace]"); if (tr) openDetail(tr.dataset.trace); });
+$("report").onclick = async () => { try { const blob = await (await rawFetch("/api/report")).blob(); window.open(URL.createObjectURL(new Blob([blob], { type: "text/html" })), "_blank"); } catch (e) { toast(e.message); } };
+
+/* ---------------- requests ---------------- */
+function fillSelect(id, values) { $(id).innerHTML = $(id).options[0].outerHTML + values.map((v) => "<option>" + esc(v) + "</option>").join(""); }
+fillSelect("f-intent", LABELS); fillSelect("f-topic", TOPICS);
+const reqFilters = () => ({ q: $("f-q").value.trim(), action: $("f-action").value, intent: $("f-intent").value, topic: $("f-topic").value, session: $("f-session").value.trim() });
+async function loadRequests() {
+  skeleton("reqlist", 4);
+  const r = await api("/api/requests?" + qs({ ...reqFilters(), limit: reqLimit, offset: reqOffset }));
+  reqTotal = r.total;
+  $("reqlist").innerHTML = r.entries.length ? "<table><tr><th>Time (UTC)</th><th>Prompt</th><th>Topic</th><th>Safety</th><th>JEV</th><th>Decision</th><th>Session</th></tr>" + r.entries.map((e) => '<tr class="click" data-trace="' + esc(e.trace_id) + '"><td>' + esc(dt(e.time)) + "</td><td>" + ptext(e.prompt) + "</td><td>" + esc(e.topic || "-") + "</td><td>" + esc(e.intent || "-") + " " + esc(e.confidence == null ? "" : Math.round(e.confidence) + "%") + "</td><td>" + esc(e.jev || "-") + "</td><td>" + decision(e.action, e.status) + "</td><td class='muted small'>" + esc((e.session_id || "").slice(0, 8)) + "</td></tr>").join("") + "</table>" : '<div class="empty">No requests match.</div>';
+  $("pageinfo").textContent = r.total ? (r.offset + 1) + "-" + Math.min(r.offset + r.limit, r.total) + " of " + r.total : "0 results";
+  $("prev").disabled = r.offset <= 0; $("next").disabled = r.offset + r.limit >= r.total;
+}
+let reqTimer = null;
+const refilter = () => { reqOffset = 0; clearTimeout(reqTimer); reqTimer = setTimeout(() => loadRequests().catch((e) => toast(e.message)), 250); };
+["f-q", "f-session"].forEach((id) => $(id).addEventListener("input", refilter)); ["f-action", "f-intent", "f-topic"].forEach((id) => $(id).addEventListener("change", refilter));
+$("f-clear").onclick = () => { ["f-q", "f-session"].forEach((id) => $(id).value = ""); ["f-action", "f-intent", "f-topic"].forEach((id) => $(id).selectedIndex = 0); refilter(); };
+$("prev").onclick = () => { reqOffset = Math.max(0, reqOffset - reqLimit); loadRequests(); };
+$("next").onclick = () => { reqOffset += reqLimit; loadRequests(); };
+$("f-export").onclick = () => download("/api/export/requests?" + qs(reqFilters()), "guardgpt_requests.csv").catch((e) => toast(e.message));
+$("reqlist").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-trace]"); if (tr) openDetail(tr.dataset.trace); });
+
+/* ---------------- sessions ---------------- */
+async function loadSessions() {
+  skeleton("sesslist", 4);
+  const s = (await api("/api/sessions")).sessions;
+  $("sesslist").innerHTML = s.length ? "<table><tr><th>Session</th><th>First message</th><th>Turns</th><th>Allow</th><th>Flag</th><th>Block</th><th>Risk</th><th>Last</th></tr>" + s.map((x) => '<tr class="click" data-session="' + esc(x.session_id) + '"><td class="small">' + esc(x.session_id.slice(0, 8)) + "</td><td>" + ptext(x.preview) + "</td><td>" + x.turns + "</td><td>" + x.allow + "</td><td>" + x.flag + "</td><td>" + x.block + '</td><td><span class="bar" style="margin:0"><span class="track" style="width:70px;flex:none"><span class="fill" style="width:' + Math.round((x.risk || 0) * 100) + "%;background:" + ((x.risk || 0) > .5 ? "var(--red)" : (x.risk || 0) > .2 ? "var(--amber)" : "var(--green)") + '"></span></span><span class="num">' + Math.round((x.risk || 0) * 100) + "%</span></span></td><td class='small muted'>" + esc(dt(x.last)) + "</td></tr>").join("") + "</table>" : '<div class="empty">No chat sessions yet (single --prompt requests have no session).</div>';
+  if (pendingSession) { const id = pendingSession; pendingSession = null; showSession(id); }
+}
+$("sesslist").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-session]"); if (tr) showSession(tr.dataset.session); });
+async function showSession(id) {
+  const box = $("sesstl"); box.style.display = "block"; box.innerHTML = '<div class="skel"></div>';
+  try {
+    const t = await api("/api/sessions/" + id);
+    const pts = t.turns.map((x) => x.session_risk == null ? 0 : x.session_risk), W = 300, H = 36;
+    const spark = '<svg viewBox="0 0 ' + W + " " + H + '" width="300" height="36">' + (pts.length > 1 ? '<polyline fill="none" stroke="var(--red)" stroke-width="2" points="' + pts.map((v, i) => (i / (pts.length - 1) * (W - 4) + 2).toFixed(1) + "," + (H - 3 - v * (H - 6)).toFixed(1)).join(" ") + '"/>' : "") + "</svg>";
+    box.innerHTML = '<h3>Session ' + esc(t.session_id.slice(0, 8)) + " &middot; " + t.turns.length + ' turns</h3><div class="muted small">Session risk over the conversation</div>' + spark + t.turns.map((x) => '<div class="event"><b>' + esc(hhmmss(x.time)) + "</b>" + decision(x.action, x.status) + ' <span class="chip">' + esc(x.intent || "-") + '</span><span class="chip">' + esc(x.topic || "-") + "</span>" + (x.session_signal && x.session_signal !== "clean" ? '<span class="chip">session ' + esc(x.session_signal) + "</span>" : "") + '<div style="margin-top:4px"><a href="#" data-trace="' + esc(x.trace_id) + '">' + ptext(x.prompt) + '</a></div><div class="muted small">' + esc(x.context || "") + "</div></div>").join("");
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) { box.innerHTML = '<div class="empty">' + esc(err.message) + "</div>"; }
+}
+$("sesstl").addEventListener("click", (e) => { const a = e.target.closest("a[data-trace]"); if (a) { e.preventDefault(); openDetail(a.dataset.trace); } });
+
+/* ---------------- reviews ---------------- */
+async function loadReviews() {
+  skeleton("reviewlist", 4);
+  let rows = (await api("/api/reviews" + ($("showall").checked ? "?status=all" : ""))).reviews;
+  const pr = $("rv-prio").value; if (pr) rows = rows.filter((r) => r.priority === pr);
+  if (!rows.length) { $("reviewlist").innerHTML = '<div class="empty">No reviews.</div>'; return; }
+  $("reviewlist").innerHTML = "<table><tr><th></th><th>Priority</th><th>Review</th><th>Prompt (redacted)</th><th>Why</th><th>Pending</th><th>Action</th></tr>" + rows.map((r) => {
+    const pending = r.status === "PENDING";
+    const act = pending ? '<button class="ghost" data-act="APPROVED" data-id="' + esc(r.review_id) + '">Approve</button> <button class="ghost" data-act="REJECTED" data-id="' + esc(r.review_id) + '">Reject</button>' : badge(r.status) + (r.resolution && r.resolution.note ? '<div class="muted small">' + esc(r.resolution.note) + "</div>" : "");
+    return "<tr><td>" + (pending ? '<input type="checkbox" class="rv-sel" value="' + esc(r.review_id) + '">' : "") + "</td><td>" + badge(r.priority || "normal") + (r.escalated ? '<div class="chip" style="margin-top:4px">escalated</div>' : "") + "</td><td class='small'>" + esc(r.review_id) + '<div class="muted">' + esc(dt(r.created_at)) + "</div></td><td>" + ptext(r.prompt || "(open the trace)") + "</td><td class='small'>" + esc(r.intent || "-") + " / " + esc(r.risk_level || "-") + '<div class="muted">' + esc((r.escalation_reasons || r.reason_codes || []).slice(0, 3).join(", ")) + "</div></td><td class='small'>" + esc(pending ? age(r.age_seconds) : "") + "</td><td>" + (r.trace_id ? '<button class="ghost" data-trace="' + esc(r.trace_id) + '">Details</button> ' : "") + act + "</td></tr>";
+  }).join("") + "</table>";
+}
+async function resolveIds(ids, decision) {
+  if (!ids.length) { toast("Select reviews first"); return; }
+  const reviewer = $("reviewer").value.trim() || "dashboard"; localStorage.setItem("reviewer", reviewer);
+  const r = await post("/api/reviews/bulk", { ids, decision, reviewer, note: $("rv-note").value.trim() });
+  toast(r.resolved + " of " + ids.length + " " + decision.toLowerCase()); loadReviews();
+}
+$("reviewlist").addEventListener("click", async (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  try { if (b.dataset.trace) openDetail(b.dataset.trace); else if (b.dataset.act) await resolveIds([b.dataset.id], b.dataset.act); } catch (err) { toast(err.message); }
+});
+const selected = () => Array.from(document.querySelectorAll(".rv-sel:checked")).map((c) => c.value);
+$("rv-approve").onclick = () => resolveIds(selected(), "APPROVED").catch((e) => toast(e.message));
+$("rv-reject").onclick = () => resolveIds(selected(), "REJECTED").catch((e) => toast(e.message));
+$("showall").onchange = loadReviews; $("rv-prio").onchange = loadReviews; $("reload-reviews").onclick = loadReviews;
+$("rv-export").onclick = () => download("/api/export/reviews" + ($("showall").checked ? "?status=all" : ""), "guardgpt_reviews.csv").catch((e) => toast(e.message));
+
+/* ---------------- feedback ---------------- */
+async function loadFeedback() {
+  skeleton("fblist", 3);
+  const f = (await api("/api/feedback")).feedback;
+  const wrong = f.filter((x) => x.verdict === "wrong").length;
+  $("fb-count").textContent = f.length + " marked, " + wrong + " wrong";
+  $("fblist").innerHTML = f.length ? "<table><tr><th>When</th><th>Verdict</th><th>Predicted</th><th>Should be</th><th>Prompt (redacted)</th><th>Note</th><th></th></tr>" + f.map((x) => "<tr><td class='small'>" + esc(dt(x.at)) + "</td><td>" + badge(x.verdict) + "</td><td>" + esc(x.predicted_intent || "-") + "</td><td>" + esc(x.correct_label || "-") + "</td><td>" + ptext(x.prompt) + "</td><td class='small'>" + esc(x.note || "") + '</td><td><button class="ghost" data-trace="' + esc(x.trace_id) + '">Details</button></td></tr>').join("") + "</table>" : '<div class="empty">No feedback yet. Open a request and use "Mark" at the bottom of its details.</div>';
+}
+$("fblist").addEventListener("click", (e) => { const b = e.target.closest("button[data-trace]"); if (b) openDetail(b.dataset.trace); });
+$("fb-export").onclick = async () => {
+  try {
+    const x = await api("/api/feedback/export"), box = $("fb-out"); box.style.display = "block";
+    if (!x.count) { box.innerHTML = '<div class="empty">No wrong predictions marked yet' + (x.skipped ? " (" + x.skipped + " skipped: too long or contains placeholders)" : "") + ".</div>"; return; }
+    box.innerHTML = '<div class="row"><b>' + x.count + ' anchor lines</b><span class="muted small">' + esc(x.how_to) + '</span><button class="primary" id="fb-dl" style="margin-left:auto">Download JSON</button></div><pre>' + esc(JSON.stringify(x.anchors, null, 2)) + "</pre>";
+    $("fb-dl").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(x.anchors, null, 2)], { type: "application/json" })); a.download = "anchor_lines.json"; a.click(); };
+  } catch (e) { toast(e.message); }
+};
+
+/* ---------------- evaluation ---------------- */
+function pc(v) { return v == null ? "-" : Math.round(v * 100) + "%"; }
+function evalHtml(r) {
+  const names = Object.keys(r.sets || {}); if (!names.length) return '<div class="empty">No results.</div>';
+  return '<div class="muted small" style="margin-bottom:10px">JEV backend: ' + esc(r.jev_backend || "-") + " &middot; " + esc(r.seconds) + " s &middot; " + esc(dt(r.generated_at)) + "</div>" + names.map((n) => {
+    const s = r.sets[n], a = s.accuracy, v = s.safe_vs_unsafe, labels = Object.keys(s.per_label);
+    const conf = "<table class='conf'><tr><th>gold \\ predicted</th>" + LABELS.map((l) => "<th class='small'>" + esc(l.replace(/_/g, " ")) + "</th>").join("") + "</tr>" + labels.map((g) => "<tr><th class='small'>" + esc(g) + "</th>" + LABELS.map((p) => { const c = (s.confusion[g] || {})[p] || 0; return "<td class='" + (g === p ? "diag" : "") + "' style='background:" + (c ? (g === p ? "var(--green-bg)" : "var(--red-bg)") : "transparent") + "'>" + (c || "") + "</td>"; }).join("") + "</tr>").join("") + "</table>";
+    return '<div class="card box"><h3>' + esc(n) + " &middot; " + s.n + ' prompts</h3><div class="grid">' +
+      [["Ensemble", a.ensemble], ["Intent head", a.head], ["Anchors", a.anchors], ["Dataset kNN", a.dataset], ["JEV model", a.jev], ["Safe vs unsafe (final decision)", v.decision]].map(([l, x]) => '<div class="card stat"><div class="n">' + pc(x) + '</div><div class="l">' + esc(l) + "</div></div>").join("") + '</div><div class="scroll"><table><tr><th>Label</th><th>n</th><th>Ensemble</th><th>Head</th><th>Anchors</th><th>JEV</th></tr>' + labels.map((l) => { const p = s.per_label[l]; return "<tr><td>" + esc(l) + "</td><td>" + p.n + "</td><td>" + p.ensemble + "</td><td>" + p.head + "</td><td>" + p.anchors + "</td><td>" + p.jev + "</td></tr>"; }).join("") + '</table></div><h3 style="margin-top:14px">Confusion matrix (ensemble)</h3><div class="scroll">' + conf + "</div>" +
+      (s.false_positives.length ? '<h3 style="margin-top:14px">Safe prompts that were flagged or blocked</h3>' + s.false_positives.map((p) => '<div class="small">&bull; ' + esc(p) + "</div>").join("") : "") +
+      (s.missed_attacks.length ? '<h3 style="margin-top:14px">Attacks that were allowed</h3>' + s.missed_attacks.map((p) => '<div class="small">&bull; ' + esc(p) + "</div>").join("") : "") +
+      (s.errors.length ? '<details style="margin-top:14px"><summary>' + s.errors.length + " misclassified (ensemble)</summary>" + s.errors.map((e) => '<div class="small">&bull; ' + esc(e.gold) + " -> " + esc(e.predicted) + " (" + esc(e.confidence) + ") " + esc(e.prompt) + "</div>").join("") + "</details>" : "") + "</div>";
+  }).join("");
+}
+async function loadEval() {
+  const s = await api("/api/eval/status");
+  clearTimeout(evalTimer);
+  $("ev-quick").disabled = $("ev-full").disabled = s.state === "running";
+  if (s.state === "running") { $("ev-state").innerHTML = badge("running", "b-running") + " " + s.seconds + " s" + (s.include_jev ? " (full run, this takes minutes)" : ""); $("ev-out").innerHTML = '<div class="skel"></div><div class="skel"></div>'; evalTimer = setTimeout(() => currentTab === "evaluation" && loadEval().catch(() => {}), 3000); return; }
+  if (s.state === "failed") { $("ev-state").innerHTML = badge("failed", "b-failed") + " exit code " + esc(s.exit_code); $("ev-out").innerHTML = '<div class="empty">The evaluation failed. Log: ' + esc(s.log) + "</div>"; return; }
+  $("ev-state").innerHTML = s.result ? badge("last result", "b-done") : "";
+  $("ev-out").innerHTML = s.result ? evalHtml(s.result) : '<div class="empty">No evaluation run yet.</div>';
+}
+async function startEval(full) { try { await post("/api/eval/start", { include_jev: full }); loadEval(); } catch (e) { toast(e.message); } }
+$("ev-quick").onclick = () => startEval(false); $("ev-full").onclick = () => startEval(true);
+
+/* ---------------- system ---------------- */
+const kb = (b) => b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1000)) + " KB";
+async function loadSystem() {
+  skeleton("sysbox", 4);
+  const s = await api("/api/system"), st = s.status || {}, ol = s.ollama || {};
+  const ok = (b) => badge(b ? "ok" : "problem", b ? "b-allow" : "b-block");
+  $("sysbox").innerHTML = '<div class="two"><div class="card box"><h3>Readiness</h3><div class="kv"><div>Ollama</div><div>' + ok(ol.reachable) + (ol.reachable ? "" : " " + esc(ol.error || "")) + "</div><div>Intent model</div><div>" + ok(st.intent_model) + "</div><div>Data files</div><div>" + ok(st.data_files) + "</div><div>JEV</div><div>" + esc((st.jev || {}).mode || "-") + " " + ok((st.jev || {}).ok) + ((st.jev || {}).problems || []).map((p) => '<div class="muted small">' + esc(p) + "</div>").join("") + '</div></div></div><div class="card box"><h3>Ollama models</h3>' + ((ol.models || []).length ? ol.models.map((m) => '<div class="bar"><span class="name" style="width:200px">' + esc(m.name) + '</span><span class="num" style="width:auto">' + esc(m.size_mb) + " MB</span></div>").join("") : '<div class="empty">none</div>') + '</div></div><div class="two"><div class="card box"><h3>Configuration</h3><div class="kv">' + Object.entries(s.config).map(([k, v]) => "<div>" + esc(k) + "</div><div>" + esc(v) + "</div>").join("") + '</div></div><div class="card box"><h3>Packages</h3><div class="kv">' + Object.entries(s.versions).map(([k, v]) => "<div>" + esc(k) + "</div><div>" + esc(v || "not installed") + "</div>").join("") + '</div></div></div><div class="card box"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">Log files &middot; ' + esc(kb(s.logs.total_bytes)) + ' &middot; ' + esc(s.logs.dir) + '</h3><button class="ghost danger" id="trim" style="margin-left:auto">Trim old logs...</button></div><div class="scroll"><table><tr><th>File</th><th>Size</th><th>Records</th><th>Modified</th></tr>' + s.logs.files.map((f) => "<tr><td>" + esc(f.name) + "</td><td>" + esc(kb(f.bytes)) + "</td><td>" + esc(f.lines ?? "") + "</td><td class='small muted'>" + esc(dt(f.modified)) + "</td></tr>").join("") + '</table></div><div class="hint" style="margin:8px 0 0">Trimming keeps the newest records of the trace, audit, prompt, session, complete, requests and error logs. The review queue, escalations, feedback and metrics are never touched.</div></div>';
+}
+$("sysbox").addEventListener("click", async (e) => {
+  if (e.target.id !== "trim") return;
+  const keep = prompt("Keep only the newest N records of each large log (100 or more).\nStop any running chat first. This cannot be undone.", "1000"); if (!keep) return;
+  try { const r = await post("/api/system/trim", { confirm: true, keep: Number(keep) }); toast("Trimmed: kept " + r.kept + " records per log"); loadSystem(); } catch (err) { toast(err.message, 5000); }
+});
+$("sys-refresh").onclick = loadSystem;
+
+/* ---------------- traces ---------------- */
+function openTrace(id) { $("traceid").value = id; show("traces"); loadTrace(); }
+async function loadTrace() {
+  const id = $("traceid").value.trim(); if (!id) return;
+  try {
+    const t = await api("/api/trace/" + encodeURIComponent(id));
+    $("tracebox").innerHTML = '<div class="event"><b>trace</b>' + esc(t.trace_id) + "</div>" + t.events.map((ev) => { const { timestamp, trace_id, request_id, session_id, event, ...rest } = ev; return '<div class="event"><b>' + esc(event) + '</b><span class="chip">' + esc((timestamp || "").slice(11, 23)) + "</span><pre>" + esc(JSON.stringify(rest, null, 1)) + "</pre></div>"; }).join("");
+  } catch (e) { $("tracebox").innerHTML = '<div class="empty">' + esc(e.message) + "</div>"; }
+}
+$("loadtrace").onclick = loadTrace; $("traceid").addEventListener("keydown", (e) => { if (e.key === "Enter") loadTrace(); });
+
+/* ---------------- request detail drawer ---------------- */
+function closeDetail() { document.body.classList.remove("drawer-open"); }
+$("veil").onclick = closeDetail; $("dr-close").onclick = closeDetail;
+const stageCls = (s) => { s = String(s || "").toUpperCase(); return s === "SAFE" || s === "ALLOW" ? "ok" : s === "FLAG" || s === "REVIEW" ? "warn" : s ? "bad" : "off"; };
+function distTable(l2) {
+  const src = l2.sources || {}, cols = [["Ensemble", l2.probabilities], ["Head", src.head], ["Anchors", src.anchors], ["Dataset", src.dataset]].filter((c) => c[1]);
+  return '<div class="scroll"><table><tr><th>Label</th>' + cols.map((c) => "<th>" + c[0] + "</th>").join("") + "</tr>" + LABELS.map((l) => "<tr><td" + (l === l2.intent ? ' style="font-weight:700"' : "") + ">" + esc(l) + "</td>" + cols.map((c) => { const v = (c[1] || {})[l] || 0; return '<td><span class="bar" style="margin:0"><span class="track" style="width:44px;flex:none"><span class="fill" style="width:' + Math.round(v * 100) + '%"></span></span><span class="num" style="width:38px">' + Math.round(v * 100) + "%</span></span></td>"; }).join("") + "</tr>").join("") + "</table></div>";
+}
+function waterfall(t) {
+  const st = t.stages_ms || {}, keys = Object.keys(st), total = t.total_ms || keys.reduce((a, k) => a + st[k], 0);
+  if (!keys.length) return '<div class="muted small">No timing recorded.</div>';
+  let acc = 0;
+  return keys.map((k) => { const w = st[k] / total * 100, left = acc / total * 100; acc += st[k]; return '<div class="water"><span class="name">' + esc(k) + '</span><span class="track"><span class="fill" style="left:' + left.toFixed(1) + "%;width:" + Math.max(0.8, w).toFixed(1) + '%"></span></span><span class="num">' + sec(st[k]) + "</span></div>"; }).join("") + '<div class="muted small right">total ' + sec(total) + "</div>";
+}
+function list(items) { return (items || []).length ? items.map((i) => '<span class="chip">' + esc(i) + "</span>").join("") : '<span class="muted small">none</span>'; }
+async function openDetail(id) {
+  document.body.classList.add("drawer-open"); $("dr-title").textContent = "Request " + String(id).slice(0, 8); $("dr-badge").innerHTML = ""; skeleton("dr-body", 6);
+  try {
+    const d = await api("/api/request/" + encodeURIComponent(id)), l1 = d.layer1_input, l2 = d.layer2, jev = d.jev || {}, pol = d.policy || {}, out = d.layer1_output, fin = d.final || {}, ctx = l2.context || {};
+    $("dr-title").textContent = "Request " + d.summary.trace_id.slice(0, 8); $("dr-badge").innerHTML = decision(fin.action, fin.status);
+    const tools = ((d.agent || {}).tool_calls || []).map((c) => c.tool + (c.via ? " (" + c.via + ")" : "") + (c.status && c.status !== "ok" ? " " + c.status : ""));
+    $("dr-body").innerHTML =
+      '<div class="muted small" style="margin-bottom:6px">' + esc(dt(d.summary.time)) + " UTC" + (d.session_id ? ' &middot; session <a href="#" data-session="' + esc(d.session_id) + '">' + esc(d.session_id.slice(0, 8)) + "</a> turn " + esc(d.turn) : "") + "</div>" +
+      '<div class="card promptbox">' + ptext(d.prompt) + "</div>" +
+      '<div class="pipe">' +
+        '<div class="stage ' + stageCls(l1.status) + '"><div class="t">Layer 1 input</div><div class="v">' + esc(l1.status || "-") + '</div><div class="s">risk ' + esc(l1.risk_score ?? "-") + (l1.findings.length ? " &middot; " + esc(l1.findings.length) + " findings" : "") + "</div></div>" +
+        '<div class="stage ' + (l2.intent === "safe" ? "ok" : "bad") + '"><div class="t">Layer 2 intent</div><div class="v">' + esc(l2.intent || "-") + '</div><div class="s">' + esc(pctv(l2.confidence)) + (l2.passed_threshold === false ? " (below threshold)" : "") + "</div></div>" +
+        '<div class="stage ' + stageCls(jev.verdict) + '"><div class="t">JEV</div><div class="v">' + esc(jev.verdict || "-") + '</div><div class="s">' + esc(jev.label || "") + " " + esc(pctv(jev.confidence)) + " &middot; " + esc(jev.backend || "") + "</div></div>" +
+        '<div class="stage ' + stageCls(pol.action) + '"><div class="t">Layer 3 policy</div><div class="v">' + esc(pol.action || "-") + '</div><div class="s">route ' + esc(pol.route || "-") + " &middot; " + esc(pol.risk_level || "") + "</div></div>" +
+        '<div class="stage ' + (out ? stageCls(out.status) : "off") + '"><div class="t">Output guard</div><div class="v">' + esc(out ? out.status : "not run") + '</div><div class="s">' + (out ? esc((out.findings || []).join(", ") || "clean") : "no answer generated") + "</div></div></div>" +
+      '<div class="card box"><h3>Safety intent: who said what</h3>' + distTable(l2) + (jev.probabilities && Object.keys(jev.probabilities).length ? '<div class="muted small" style="margin-top:8px">Fine-tuned JEV model: ' + Object.entries(jev.probabilities).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => esc(k) + " " + Math.round(v * 100) + "%").join(" &middot; ") + "</div>" : "") + "</div>" +
+      '<div class="card box"><h3>Where the time went</h3>' + waterfall(d.timings) + "</div>" +
+      '<div class="card box"><h3>Findings and reasons</h3><div class="kv"><div>Layer 1 findings</div><div>' + list(l1.findings) + "</div><div>Self-harm level</div><div>" + esc(l1.self_harm_level || "none") + "</div><div>PII found</div><div>" + list(l1.pii_types) + "</div><div>JEV rationale</div><div>" + list(jev.rationale) + "</div><div>Policy reasons</div><div>" + list(pol.reason_codes) + "</div><div>Topic</div><div>" + esc((d.topic || {}).topic || "-") + "</div><div>Task / context</div><div>" + esc(ctx.summary || ctx.task || "-") + "</div><div>Tools</div><div>" + list(tools) + "</div><div>Session risk</div><div>" + esc(d.session_risk == null ? "-" : Math.round(d.session_risk * 100) + "%") + "</div>" + (d.review ? "<div>Review</div><div>" + esc(d.review.review_id) + " " + badge(d.review.priority || "normal") + (d.review.escalated ? " escalated" : "") + "</div>" : "") + "</div></div>" +
+      '<div class="card box"><h3>Is the safety intent right?</h3><div id="fb-box">' + feedbackHtml(d) + '</div></div><div class="row"><button class="ghost" data-rawtrace="' + esc(d.summary.trace_id) + '">Open raw trace</button></div>';
+    $("dr-body").dataset.trace = d.summary.trace_id;
+  } catch (e) { $("dr-body").innerHTML = '<div class="empty">' + esc(e.message) + "</div>"; }
+}
+function feedbackHtml(d) {
+  const fb = d.feedback, cur = d.layer2.intent;
+  const now = fb ? '<div style="margin-bottom:8px">Marked: ' + badge(fb.verdict) + (fb.verdict === "wrong" ? " should be <b>" + esc(fb.correct_label) + "</b>" : "") + (fb.note ? ' <span class="muted small">' + esc(fb.note) + "</span>" : "") + "</div>" : "";
+  return now + '<div class="row"><span class="muted small">Predicted: <b>' + esc(cur) + '</b></span><button class="ghost" data-fb="correct">Correct</button><select id="fb-label">' + LABELS.filter((l) => l !== cur).map((l) => "<option>" + esc(l) + "</option>").join("") + '</select><button class="ghost danger" data-fb="wrong">Wrong, should be this</button></div><input type="text" id="fb-note" placeholder="Note (optional)" style="width:100%">';
+}
+$("dr-body").addEventListener("click", async (e) => {
+  const raw = e.target.closest("[data-rawtrace]"); if (raw) { closeDetail(); openTrace(raw.dataset.rawtrace); return; }
+  const sess = e.target.closest("a[data-session]"); if (sess) { e.preventDefault(); pendingSession = sess.dataset.session; closeDetail(); show("sessions"); return; }
+  const b = e.target.closest("button[data-fb]"); if (!b) return;
+  try {
+    await post("/api/feedback", { trace_id: $("dr-body").dataset.trace, verdict: b.dataset.fb, correct_label: b.dataset.fb === "wrong" ? $("fb-label").value : null, note: $("fb-note").value.trim() });
+    toast("Feedback saved"); openDetail($("dr-body").dataset.trace); if (currentTab === "feedback") loadFeedback();
+  } catch (err) { toast(err.message); }
+});
+
+/* ---------------- live updates ---------------- */
+function setLive(on) { live = on; $("live").textContent = on ? "live: on" : "live: off"; $("live").classList.toggle("ok", on); }
+function onLive(ev) {
+  if (ev.type === "request") {
+    lastRequest = ev.entry.time; drawPills();
+    if (currentTab === "overview" || currentTab === "requests" || currentTab === "sessions") refresh();
+    if (ev.entry.action !== "ALLOW") toast("New " + (ev.entry.action || "").toLowerCase() + ": " + ev.entry.prompt.slice(0, 60));
+  } else if (ev.type === "escalation") {
+    const e = ev.entry; toast("ESCALATION (" + e.priority + "): " + (e.escalation_reasons || []).join(", "), 6000);
+    if ("Notification" in window && Notification.permission === "granted") new Notification("GuardGPT escalation: " + e.priority, { body: (e.escalation_reasons || []).join(", ") + " - " + (e.intent || "") });
+    const old = document.title; document.title = "(!) " + old; setTimeout(() => (document.title = old), 8000);
+    if (currentTab === "reviews" || currentTab === "overview") refresh();
+  } else if (ev.type === "review" && currentTab === "reviews") refresh();
+}
+async function startLive() {
+  for (;;) {
+    try {
+      const res = await fetch("/api/stream", { headers: { "x-dashboard-token": TOKEN } });
+      if (!res.ok || !res.body) throw new Error("stream");
+      setLive(true); const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true }); let i;
+        while ((i = buf.indexOf("\n\n")) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const line = chunk.split("\n").find((l) => l.startsWith("data:")); if (line) { try { onLive(JSON.parse(line.slice(5))); } catch (e) {} } }
+      }
+    } catch (e) {}
+    setLive(false); await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+$("live").onclick = () => { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().then((p) => toast(p === "granted" ? "Desktop alerts enabled" : "Desktop alerts not enabled")); else toast(live ? "Live updates are on" : "Reconnecting..."); };
+
+/* ---------------- keyboard, startup ---------------- */
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeDetail(); return; }
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || "")) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key >= "1" && e.key <= "8") show(TABS[Number(e.key) - 1]);
+  else if (e.key === "/") { e.preventDefault(); show("requests"); $("f-q").focus(); }
+  else if (e.key === "r") refresh();
+});
+$("reviewer").value = localStorage.getItem("reviewer") || "";
+applyTheme(); applyPrivacy(); loadStatus(); startLive();
+{
+  // Deep links: #requests, #request/<trace id> (opens the detail panel), #session/<session id>
+  const hash = location.hash.slice(1), [kind, ref] = hash.split("/");
+  if (kind === "request" && ref) { show("overview"); openDetail(ref); }
+  else if (kind === "session" && ref) { pendingSession = ref; show("sessions"); }
+  else show(TABS.includes(hash) ? hash : "overview");
+}
+setInterval(() => { if (!document.hidden && currentTab === "overview" && !live) refresh(); }, 5000);
+setInterval(() => { if (!document.hidden) loadStatus(); }, 20000);
+setInterval(drawPills, 1000);
+</script>
+</body>
+</html>

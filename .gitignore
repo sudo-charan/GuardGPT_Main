@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.jev-venv/
+venv/
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+logs/*.jsonl
+logs/*.json
+cache/*
+!cache/.gitkeep
+!cache/README.md
+*.bak
+*.tmp

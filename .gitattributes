@@ -1,0 +1,10 @@
+# Model weights are stored with Git LFS (GitHub rejects normal files over 100 MB).
+*.pt filter=lfs diff=lfs merge=lfs -text
+
+# Keep the dataset, id map and index byte-for-byte identical on every system.
+data/*.jsonl -text
+data/*.json -text
+data/*.index binary
+
+# Shell scripts need LF line endings on Linux and macOS.
+*.sh text eol=lf
