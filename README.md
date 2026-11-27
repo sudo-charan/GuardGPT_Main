@@ -34,7 +34,7 @@ Runtime files expected in the project:
 - for the fine-tuned JEV: `intent_classifier/jev_finetuned/best_model.pt` (see below)
 
 The fine-tuned JEV paths in `.env` are full paths. If you move or rename the project
-folder, update them (see [Troubleshooting](#troubleshooting)).
+folder, update them and check with `python main.py --status`.
 
 The embedding model `all-MiniLM-L6-v2` is loaded from the HuggingFace cache,
 or from a folder set in `GUARDGPT_EMBEDDING_MODEL`.
@@ -318,7 +318,7 @@ A normal run reports 1 skipped test and 3 expected failures:
 - The skipped test (`test_invalid_arguments_surface_as_tool_error`) needs a live MCP server.
   `python -m tests.test_mcp_client` starts one and runs all 13 MCP client tests.
 - The expected failures in `tests/test_cases/test_known_gaps.py` describe gaps that are
-  still open (see [Known limitations](#known-limitations)). When one is fixed the run
+  still open. When one is fixed the run
   reports an "unexpected success"; remove its `@unittest.expectedFailure` marker then.
 
 The accuracy tests need the embedding model and the trained head and are skipped if they
@@ -333,60 +333,6 @@ fine-tuned JEV), needs no Ollama and writes nothing to `logs/`. Run it as a scri
 `python -m`, so the test settings do not switch JEV to builtin mode. `--set fresh` limits
 it to the unseen prompts, `-v` lists the prompts each version gets wrong, and `--json`
 saves the numbers.
-
-## Troubleshooting
-
-**Every message is blocked with "The JEV model is unavailable"** (`final_status=ERROR`,
-`jev_failed`). `JEV_CHECKPOINT`, `JEV_BASE_MODEL_DIR` or `JEV_ADAPTER` points to a path
-that does not exist, often after the project folder was moved or renamed. Fix the paths in
-`.env`, check them with `python main.py --status`, then restart the chat and the dashboard.
-
-**Every message is blocked with "The paging file is too small for this operation to
-complete. (os error 1455)".** Windows ran out of memory while loading the fine-tuned JEV,
-which needs several GB. Close other GuardGPT windows (each chat, the dashboard's Full
-evaluation and `evaluate_intent.py` load their own copy of the model), let the Windows
-page file grow (free space on drive C:, or add a page file on another drive), then restart
-the chat. Until then `JEV_STYLE_MODE=builtin` runs without the model.
-
-**Allowed messages get "I wasn't able to share an answer" and `[BLOCK | ERROR]`.** Ollama
-is not running or `llama3.2` is not installed. Start the Ollama app (or `ollama serve`),
-run `ollama pull llama3.2` if needed, and check with `python main.py --status`
-(`"ollama_reachable": true`). Crisis and support replies still work without Ollama.
-
-**`✗ System ready`, or `--status` reports `"dataset": false`.** A data file is missing.
-Windows Defender has quarantined `data/guardgpt_dataset.jsonl` and
-`data/guardgpt_id_map.json` as `Exploit:Python/Leivion.A`. Check **Windows Security →
-Virus & threat protection → Protection history**, and restore them from there or from your
-project archive. Defender may quarantine them again. Allow the files or exclude the
-`data/` folder only if you trust where the dataset came from, since that reduces
-protection. The chat still runs without them, but Layer 1 and Layer 2 lose their dataset
-evidence.
-
-## Known limitations
-
-- The trained intent head is weak on its own (about 58% on the project's evaluation
-  prompts); the anchors carry most of Layer 2, and the dataset has a few duplicate and
-  conflicting rows (see `data/README.md`).
-- The fine-tuned JEV can over-flag harmless security-education prompts, and is weaker on
-  jailbreak and manipulation labels. In the ablation study it caught no unsafe prompt that
-  Layers 1 and 2 with the JEV rules missed; it mostly turns FLAGs into BLOCKs, at about
-  2.5 seconds per prompt.
-- Some harmless prompts are stopped, for example "Is it safe to eat raw eggs?" (FLAG), and
-  everyday sadness such as "I feel a bit lonely today" can be treated as self-harm risk and
-  get a support reply instead of a normal answer.
-- Layer 1 pattern gaps, each with an expected-failure test in
-  `tests/test_cases/test_known_gaps.py`: a defensive word such as "avoid" switches off the
-  harm detectors for the whole prompt ("how do I make a bomb and avoid getting caught" is
-  not detected by Layer 1), and "kill" with a harmless object ("how to kill a python
-  process", "how do I kill weeds") is detected as violence, which makes Layer 1 block it.
-- Carried risk lasts only for one chat (it resets with `/new` or a restart), and its
-  values (0.9, 0.85, 0.50) are starting points not yet tuned on realistic conversations.
-- The evaluation prompts are few (35 unseen ones), so one prompt moves the unseen accuracy
-  by about 3 points; multi-turn behaviour and answer quality are not measured by them.
-- Local Llama 3.2 answers vary in quality; the reviewer checks safety, not facts.
-- Replies may contain placeholders such as `<EMAIL_1>` or `<AADHAAR_1>`, because original
-  PII is never returned. Ten-digit numbers starting with 6 to 9 are treated as Indian
-  mobile numbers and hidden, even when they are something else (an order number).
 
 ## Logs
 
