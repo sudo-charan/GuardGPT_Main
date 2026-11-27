@@ -51,7 +51,8 @@ python main.py --chat --verbose       # full layer line, distribution, reasons
 python evaluate_intent.py             # per-label accuracy on tests/data/intent_samples.json
 python evaluate_intent.py --prompt "..."
 python evaluate_intent.py --json out.json   # also write a machine-readable report
-python review_cli.py list             # FLAG review queue (with priority)
+python tests/test_cases/evaluate_ablation.py   # switch layers off one at a time and compare the decisions
+python review_cli.py list             # review queue (with priority)
 python review_cli.py escalated        # pending escalated reviews, most urgent first
 python dashboard.py                   # optional live web monitor (see below)
 python run_tests.py                   # full test suite
@@ -113,7 +114,7 @@ escalation. Tabs:
 | **Overview** | Counters, alerts (with Acknowledge), traffic-over-time chart (per hour or day) with latency, safety-intent and topic charts, recent requests, and a printable **summary report**. |
 | **Requests** | Every request, with search, filters (decision, safety intent, topic, session), paging and CSV export. |
 | **Sessions** | One row per chat session; click for the conversation as a timeline with the session risk. |
-| **Reviews** | The FLAG queue, most urgent first, with the redacted prompt, age, priority filter, notes, bulk Approve / Reject and CSV export. |
+| **Reviews** | The review queue (FLAG outcomes, carried-risk blocks and explicit crisis cases), most urgent first, with the redacted prompt, age, priority filter, notes, bulk Approve / Reject and CSV export. |
 | **Feedback** | Requests you marked correct or wrong; **Export anchor lines** turns the wrong ones into lines for `intent_anchors.json`. |
 | **Evaluation** | Runs `evaluate_intent.py` as a background job and shows accuracy for the head, anchors, dataset, ensemble and JEV, a per-label table and a confusion matrix. Quick = rules only; Full = with the fine-tuned JEV (minutes). |
 | **System** | Readiness, installed Ollama models, configuration, package versions, log files and sizes, and **Trim old logs** (never touches reviews, escalations, feedback or metrics, and refuses while a chat is writing). |
@@ -146,8 +147,24 @@ ids and labels; the evaluation job and trimming write to `logs/` (`guardgpt_feed
 
 The builtin rules also use the session: after two or more blocked turns in the last
 three, a FLAG becomes a BLOCK, and a safe verdict is flagged only if one single unsafe
-label reaches `JEV_FLAG_PEAK`. Supportive self-harm turns are also counted as blocked
+label reaches `JEV_FLAG_PEAK`. Supportive self-harm turns are not counted as blocked
 turns here.
+
+**Carried risk.** The chat also keeps one score that remembers earlier blocked turns,
+so a few harmless messages do not wipe out an earlier attack:
+
+```text
+blocked turn:   score = max(turn risk, 0.9 * score)
+any other turn: score = score * (0.85 + 0.15 * turn risk)
+```
+
+A safe turn lowers the score faster than a doubtful one. While the score is 0.50 or
+more, a JEV FLAG becomes a BLOCK (reason `escalated_carried_risk`), in every JEV mode.
+Such a block is still added to the review queue and does not raise the score again.
+Self-harm turns leave the score unchanged and are never upgraded. The score starts at 0,
+stays 0 in a chat with no blocked turn, and resets with `/new` or a new chat. It is shown
+as `carried_risk` in the session report and the `jev` trace event. Set
+`JEV_CARRY_ENABLED=0` for the old behaviour.
 
 In `finetuned` mode the question and class descriptions come from the checkpoint itself
 (`jev_adapter_guardgpt.py` reads them). The model was trained with that wording, so
@@ -196,8 +213,11 @@ in the metrics (an urgent one raises the `urgent_escalation` alert) and listed f
 review or escalated to a human reviewer. Resolving a review (`review_cli.py resolve`, or
 the dashboard) records the decision only; it never releases the withheld answer.
 
-Only FLAG outcomes are queued. A supportive self-harm reply, including an explicit
-crisis, is not sent to the review queue or escalated.
+FLAG outcomes are queued, and so are two kinds of BLOCK: one caused only by carried risk,
+and an explicit self-harm crisis. A crisis is queued as `urgent` and escalated (reason
+`crisis_support`, stage `support`) so a person can follow up, while the supportive reply is
+still shown at once. Other supportive self-harm replies are not queued. The queue only
+helps if someone watches it, for example through the dashboard's `urgent_escalation` alert.
 
 ## Tools MCP server
 
@@ -238,6 +258,9 @@ not be reachable without Layers 1-3. Tool calls pass an allowlist and size limit
 | `JEV_BLOCK_THRESHOLD` | `0.75` | Uncorroborated unsafe label needs this to BLOCK |
 | `JEV_FLAG_THRESHOLD` | `0.50` | Unsafe probability mass that still FLAGs |
 | `JEV_FLAG_PEAK` | `0.40` | "safe" with an unsafe label this close becomes FLAG |
+| `JEV_CARRY_ENABLED` | `1` | Carried risk from earlier blocked turns (`0` turns it off) |
+| `JEV_CARRY_THRESHOLD` | `0.50` | Carried risk at which a FLAG becomes BLOCK |
+| `JEV_CARRY_DECAY`, `JEV_CARRY_SAFE_KEEP` | `0.9`, `0.85` | How a blocked turn keeps, and another turn fades, the score |
 | `JEV_STYLE_URL`, `JEV_STYLE_TIMEOUT` | `http://127.0.0.1:8765`, `300` | External Jev-Style server (`server` / `auto`) |
 
 ## MCP services
@@ -268,18 +291,48 @@ agent/mcp_client.py        MCP client
 agent/tool_client.py       client for the tools MCP server
 intent_classifier/         MiniLM head, tokenizer, anchors, jev_finetuned/
 data/                      dataset + FAISS index
-tests/                     unit, flow, accuracy and dashboard tests
+tests/                     offline test suite (see Tests); tests/data/ holds the labelled prompts
+tests/test_cases/          edge cases, multi-turn chats, fixed and open gaps, evaluate_ablation.py
 jev_adapter_guardgpt.py    adapter for the fine-tuned JEV checkpoint
 jev_adapter_example.py     template for another JEV adapter
 ```
 
 ## Tests
 
-`python run_tests.py` runs the offline suite (231 tests, under a minute). It is
-pinned to the builtin JEV (`tests/__init__.py`), so it does not load the 1.5 GB model;
-the model-based accuracy tests need the embedding model and the trained head and are
-skipped if they are missing. No Ollama server is needed. The accuracy tests also use the
-dataset when it is present, so run them with the data files in place.
+`python run_tests.py` runs the offline suite: 314 tests in under a minute. No Ollama server
+is needed. The suite is pinned to the builtin JEV (`tests/__init__.py`), so it does not
+load the 1.5 GB model, and it writes logs to a temporary folder, never to `logs/`.
+
+| File | What it checks |
+|---|---|
+| `tests/test_layers.py` | Layer 1, self-harm assessment, redaction, topics, JEV rules, Layer 3, output checks |
+| `tests/test_pipeline.py` | The whole request flow, conversations, crisis replies, context, escalation, carried risk |
+| `tests/test_agent_tools.py`, `tests/test_markdown_repair.py` | LangGraph agent, its tools, markdown repair |
+| `tests/test_mcp_client.py`, `tests/test_mcp_registry.py` | MCP servers, client, registry and policy hooks |
+| `tests/test_dashboard.py` | Dashboard, review CLI, logs, metrics and alerts |
+| `tests/test_intent_accuracy.py`, `tests/test_dataset_loader.py` | Accuracy on `tests/data/intent_samples.json`, dataset and index loading |
+| `tests/test_cases/` | Input edge cases, every Layer 3 route, session memory limits, multi-turn chats, fixed gaps, and the open gaps |
+
+A normal run reports 1 skipped test and 3 expected failures:
+
+- The skipped test (`test_invalid_arguments_surface_as_tool_error`) needs a live MCP server.
+  `python -m tests.test_mcp_client` starts one and runs all 13 MCP client tests.
+- The expected failures in `tests/test_cases/test_known_gaps.py` describe gaps that are
+  still open (see [Known limitations](#known-limitations)). When one is fixed the run
+  reports an "unexpected success"; remove its `@unittest.expectedFailure` marker then.
+
+The accuracy tests need the embedding model and the trained head and are skipped if they
+are missing; they also use the dataset when it is present, so run them with the data
+files in place.
+
+**Ablation study.** `python tests/test_cases/evaluate_ablation.py` switches layers off one
+at a time (Layer 1, Layer 2, the fine-tuned JEV model, the whole JEV) and compares the
+final decisions on the labelled prompts: unsafe prompts caught, safe prompts wrongly
+stopped, accuracy and time per prompt. It uses the real models (about 5 minutes with the
+fine-tuned JEV), needs no Ollama and writes nothing to `logs/`. Run it as a script, not with
+`python -m`, so the test settings do not switch JEV to builtin mode. `--set fresh` limits
+it to the unseen prompts, `-v` lists the prompts each version gets wrong, and `--json`
+saves the numbers.
 
 ## Troubleshooting
 
@@ -287,6 +340,18 @@ dataset when it is present, so run them with the data files in place.
 `jev_failed`). `JEV_CHECKPOINT`, `JEV_BASE_MODEL_DIR` or `JEV_ADAPTER` points to a path
 that does not exist, often after the project folder was moved or renamed. Fix the paths in
 `.env`, check them with `python main.py --status`, then restart the chat and the dashboard.
+
+**Every message is blocked with "The paging file is too small for this operation to
+complete. (os error 1455)".** Windows ran out of memory while loading the fine-tuned JEV,
+which needs several GB. Close other GuardGPT windows (each chat, the dashboard's Full
+evaluation and `evaluate_intent.py` load their own copy of the model), let the Windows
+page file grow (free space on drive C:, or add a page file on another drive), then restart
+the chat. Until then `JEV_STYLE_MODE=builtin` runs without the model.
+
+**Allowed messages get "I wasn't able to share an answer" and `[BLOCK | ERROR]`.** Ollama
+is not running or `llama3.2` is not installed. Start the Ollama app (or `ollama serve`),
+run `ollama pull llama3.2` if needed, and check with `python main.py --status`
+(`"ollama_reachable": true`). Crisis and support replies still work without Ollama.
 
 **`✗ System ready`, or `--status` reports `"dataset": false`.** A data file is missing.
 Windows Defender has quarantined `data/guardgpt_dataset.jsonl` and
@@ -303,17 +368,31 @@ evidence.
   prompts); the anchors carry most of Layer 2, and the dataset has a few duplicate and
   conflicting rows (see `data/README.md`).
 - The fine-tuned JEV can over-flag harmless security-education prompts, and is weaker on
-  jailbreak and manipulation labels.
+  jailbreak and manipulation labels. In the ablation study it caught no unsafe prompt that
+  Layers 1 and 2 with the JEV rules missed; it mostly turns FLAGs into BLOCKs, at about
+  2.5 seconds per prompt.
+- Some harmless prompts are stopped, for example "Is it safe to eat raw eggs?" (FLAG), and
+  everyday sadness such as "I feel a bit lonely today" can be treated as self-harm risk and
+  get a support reply instead of a normal answer.
+- Layer 1 pattern gaps, each with an expected-failure test in
+  `tests/test_cases/test_known_gaps.py`: a defensive word such as "avoid" switches off the
+  harm detectors for the whole prompt ("how do I make a bomb and avoid getting caught" is
+  not detected by Layer 1), and "kill" with a harmless object ("how to kill a python
+  process", "how do I kill weeds") is detected as violence, which makes Layer 1 block it.
+- Carried risk lasts only for one chat (it resets with `/new` or a restart), and its
+  values (0.9, 0.85, 0.50) are starting points not yet tuned on realistic conversations.
+- The evaluation prompts are few (35 unseen ones), so one prompt moves the unseen accuracy
+  by about 3 points; multi-turn behaviour and answer quality are not measured by them.
 - Local Llama 3.2 answers vary in quality; the reviewer checks safety, not facts.
-- Replies may contain placeholders such as `<EMAIL_1>`, because original PII is never
-  returned.
+- Replies may contain placeholders such as `<EMAIL_1>` or `<AADHAAR_1>`, because original
+  PII is never returned. Ten-digit numbers starting with 6 to 9 are treated as Indian
+  mobile numbers and hidden, even when they are something else (an order number).
 
 ## Logs
 
 See `logs/README.md`. Request prompt text is stored in `guardgpt_prompt.jsonl` and
-`guardgpt_complete.jsonl` (and shown in the dashboard). It is normally redacted, but over-long
-input and prompts that fail during Layer 1 are written without redaction. Treat `logs/` as
-sensitive runtime data.
-
-For a plain-language explanation of how everything works and what each file does, see
-`PROJECT_GUIDE.md`.
+`guardgpt_complete.jsonl` (and shown in the dashboard). It is redacted before anything is
+logged, including over-long input and prompts that fail during Layer 1. Redaction covers
+emails, cards, US social security numbers, US and Indian phone numbers, Aadhaar numbers,
+API keys, JWTs and private keys; other personal data (names, addresses) is not
+recognised. Treat `logs/` as sensitive runtime data.

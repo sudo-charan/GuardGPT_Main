@@ -28,6 +28,7 @@ SENSITIVE_KINDS = (
     "api_key",
     "email",
     "credit_card",
+    "aadhaar",
     "ssn",
     "phone",
 )
@@ -48,7 +49,28 @@ _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _CREDIT_CARD_RE = re.compile(r"\b(?:\d[ -]?){12,18}\d\b")
 _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 _PHONE_RE = re.compile(
-    r"(?<![\d.])(?:\+\d{1,3}[ -]?)?(?:\(\d{3}\)|\d{3})[ -]\d{3}[ -]\d{4}(?![\d.])"
+    r"(?<![\d.])(?:\+\d{1,3}[ -]?)?(?:\(\d{3}\)|\d{3})[ -]\d{3}[ -]\d{4}(?!\.?\d)"
+)
+# Aadhaar: 12 digits in 4-4-4 form (one consistent separator or none), never starting
+# with 0 or 1, and the last digit is a Verhoeff check digit.
+_AADHAAR_RE = re.compile(r"(?<![\d.])[2-9]\d{3}([ -]?)\d{4}\1\d{4}(?!\.?\d)")
+# Indian mobile: 10 digits starting 6-9, written 98765 43210 or 9876543210, with an
+# optional +91 or 0 prefix.
+_INDIA_PHONE_RE = re.compile(r"(?<![\d.+])(?:\+91[ -]?|0)?[6-9]\d{4}[ -]?\d{5}(?!\.?\d)")
+
+# Verhoeff tables (dihedral group D5), used by the Aadhaar check digit.
+_VERHOEFF_D = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9), (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+    (2, 3, 4, 0, 1, 7, 8, 9, 5, 6), (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+    (4, 0, 1, 2, 3, 9, 5, 6, 7, 8), (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+    (6, 5, 9, 8, 7, 1, 0, 4, 3, 2), (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+    (8, 7, 6, 5, 9, 3, 2, 1, 0, 4), (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+)
+_VERHOEFF_P = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9), (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+    (5, 8, 0, 3, 7, 9, 6, 1, 4, 2), (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+    (9, 4, 5, 3, 1, 2, 6, 8, 7, 0), (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+    (2, 7, 9, 3, 8, 0, 6, 4, 1, 5), (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
 )
 
 
@@ -72,23 +94,40 @@ def _valid_card(match: re.Match[str]) -> bool:
     return _luhn(re.sub(r"\D", "", match.group(0)))
 
 
+def _verhoeff(digits: str) -> bool:
+    """Return True when ``digits`` ends in a valid Verhoeff check digit."""
+    check = 0
+    for position, character in enumerate(reversed(digits)):
+        check = _VERHOEFF_D[check][_VERHOEFF_P[position % 8][int(character)]]
+    return check == 0
+
+
+def _valid_aadhaar(match: re.Match[str]) -> bool:
+    return _verhoeff(re.sub(r"\D", "", match.group(0)))
+
+
 _RULES = (
     ("private_key", _PRIVATE_KEY_RE, None),
     ("jwt", _JWT_RE, None),
     ("api_key", _API_KEY_RE, None),
     ("email", _EMAIL_RE, None),
     ("credit_card", _CREDIT_CARD_RE, _valid_card),
+    ("aadhaar", _AADHAAR_RE, _valid_aadhaar),
     ("ssn", _SSN_RE, None),
     ("phone", _PHONE_RE, None),
+    ("phone", _INDIA_PHONE_RE, None),
 )
 
 
-_DIGITS_ONLY = frozenset({"credit_card", "ssn", "phone"})
+_DIGITS_ONLY = frozenset({"credit_card", "aadhaar", "ssn", "phone"})
 
 
 def _digest(kind: str, value: str) -> str:
     """Return a stable digest so a value can be matched without being stored."""
     normalized = re.sub(r"\D", "", value) if kind in _DIGITS_ONLY else value.strip().lower()
+    if kind == "phone":
+        # The same number with or without a country code (+91, +1) or a leading 0.
+        normalized = normalized[-10:]
     return hashlib.sha256(f"{kind}:{normalized}".encode("utf-8")).hexdigest()[:16]
 
 

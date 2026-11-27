@@ -2,7 +2,8 @@
 
     Input : intent + confidence (the Layer 2 IntentResult, including its full
             probability distribution), the Layer 1 input verdict, and the
-            session's recent turns. In ``finetuned`` mode the prompt text is an
+            session's recent turns and its carried risk (earlier blocked turns,
+            fading over time). In ``finetuned`` mode the prompt text is an
             additional input, because the fine-tuned model reads it.
     Output: JEV result (verdict ALLOW | FLAG | BLOCK, risk score, rationale)
             -> Layer 3 Guard / Policy Engine.
@@ -107,6 +108,10 @@ class JEVModel:
         # The fine-tuned model is weakest on harmful_instructions (59.75 % test
         # recall), so for that label Layer 1 / Layer 2 always backstop it.
         self.finetuned_min_confidence = _env_float("JEV_MODEL_MIN_CONFIDENCE", 0.55)
+        # Carried risk: a FLAG becomes BLOCK while risk carried over from earlier
+        # blocked turns of the chat is at or above this (see SessionMemory.carried_risk).
+        self.carry_enabled = os.getenv("JEV_CARRY_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+        self.carry_threshold = _env_float("JEV_CARRY_THRESHOLD", 0.50)
 
     def finetuned_model(self):
         if self._finetuned is None:
@@ -128,7 +133,12 @@ class JEVModel:
         guard: GuardVerdict | None = None,
         session_events: Sequence[Any] | None = None,
         prompt: str | None = None,
+        carried_risk: float = 0.0,
     ) -> JEVResult:
+        return self._apply_carried_risk(
+            self._evaluate(intent, guard, session_events, prompt), intent, carried_risk)
+
+    def _evaluate(self, intent, guard, session_events, prompt) -> JEVResult:
         if self.mode == "finetuned":
             if not prompt:
                 raise JEVError("the fine-tuned JEV model needs the prompt text")
@@ -145,6 +155,27 @@ class JEVModel:
                 if self.mode == "server":
                     raise JEVError(f"Jev-Style server unavailable: {type(error).__name__}") from error
         return self._evaluate_builtin(intent, guard, session_events)
+
+    # ------------------------------------------------------------ carried risk
+    def _apply_carried_risk(self, result: JEVResult, intent: IntentResult, carried_risk: float) -> JEVResult:
+        """Final verdict FLAG + carried risk >= threshold -> BLOCK.
+
+        Applied after the model and the rules are combined, so a FLAG from either
+        counts. Self-harm and distress turns are never upgraded.
+        """
+        try:
+            carried = float(carried_risk or 0.0)
+        except (TypeError, ValueError):
+            carried = 0.0
+        if (not self.carry_enabled or result.verdict != FLAG or carried < self.carry_threshold
+                or "self_harm_risk" in {intent.intent, result.label}
+                or "distress_signal" in result.rationale):
+            return result
+        result.verdict = BLOCK
+        result.risk_score = round(min(1.0, max(result.risk_score, 0.7)), 4)
+        result.risk_level = risk_from_score(result.risk_score)
+        result.rationale = list(result.rationale) + ["escalated_carried_risk"]
+        return result
 
     # --------------------------------------------------------------- finetuned
     def _combine_finetuned(self, intent, guard, session_events, label, confidence, probabilities):
@@ -194,9 +225,12 @@ class JEVModel:
         for event in list(events or ())[-window:]:
             if isinstance(event, Mapping):
                 blocked = event.get("is_blocked", event.get("blocked", False))
+                support = event.get("support", False)
             else:
                 blocked = getattr(event, "is_blocked", False)
-            count += bool(blocked)
+                support = getattr(event, "support", False)
+            # A supportive self-harm reply is recorded as BLOCK but is not an attack.
+            count += bool(blocked) and not support
         return count
 
     def _evaluate_builtin(

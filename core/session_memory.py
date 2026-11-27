@@ -15,6 +15,7 @@ smuggled forward through the history.
 
 from __future__ import annotations
 
+import os
 from collections import deque
 
 MAX_TURNS = 8            # remembered user/assistant exchanges
@@ -22,6 +23,18 @@ MAX_MESSAGE_CHARS = 1500  # per stored message
 MAX_LEVELS = 12           # remembered per-turn self-harm levels
 MAX_TURN_RECORDS = 50     # remembered per-turn safety records
 SESSION_RISK_DECAY = 0.6  # weight of older turns in the session risk score
+
+# Carried risk (read by the JEV): a blocked turn raises it, every other turn fades it.
+CARRY_DECAY = 0.9         # a blocked turn keeps at least this share of the old score
+CARRY_SAFE_KEEP = 0.85    # share kept after a turn with risk 0 (a riskier turn keeps more)
+
+
+def _env_fraction(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if 0.0 <= value <= 1.0 else default
 
 
 class SessionMemory:
@@ -32,14 +45,24 @@ class SessionMemory:
         self.turn_count = 0
         # Sentence embedding of the previous prompt (RAM only), for follow-up detection.
         self.last_embedding = None
+        self._carried_risk = 0.0
+        self.carry_decay = _env_fraction("JEV_CARRY_DECAY", CARRY_DECAY)
+        self.carry_safe_keep = _env_fraction("JEV_CARRY_SAFE_KEEP", CARRY_SAFE_KEEP)
 
     # ---------------------------------------------------------- safety records
     def record_turn(self, *, intent: str, confidence: float, action: str, risk_score: float,
-                    topic: str | None = None, embedding=None) -> int:
-        """Record one decided turn and return its 1-based index."""
+                    topic: str | None = None, embedding=None, support: bool = False,
+                    carried_escalation: bool = False) -> int:
+        """Record one decided turn and return its 1-based index.
+
+        ``support`` marks a supportive self-harm reply (recorded as BLOCK, but not an
+        attack). ``carried_escalation`` marks a BLOCK that only the carried-risk rule
+        caused; it fades the carried risk instead of raising it.
+        """
         self.turn_count += 1
         if embedding is not None:
             self.last_embedding = embedding
+        risk = min(1.0, max(0.0, float(risk_score)))
         self._turns.append({
             "turn_index": self.turn_count,
             "topic": str(topic) if topic else None,
@@ -47,9 +70,31 @@ class SessionMemory:
             "intent_confidence": round(float(confidence), 4),
             "action": str(action),
             "is_blocked": action == "BLOCK",
-            "risk_score": round(float(risk_score), 4),
+            "support": bool(support),
+            "risk_score": round(risk, 4),
         })
+        self._update_carried_risk(intent=str(intent), blocked=action == "BLOCK", risk=risk,
+                                  skip=bool(support), carried_escalation=bool(carried_escalation))
         return self.turn_count
+
+    def _update_carried_risk(self, *, intent: str, blocked: bool, risk: float, skip: bool,
+                             carried_escalation: bool) -> None:
+        """Blocked turn: max(risk, decay * score). Other turns: score * (keep + (1 - keep) * risk).
+
+        Self-harm turns leave the score unchanged: a person who is struggling is not an attacker.
+        """
+        if skip or intent == "self_harm_risk":
+            return
+        score = self._carried_risk
+        if blocked and not carried_escalation:
+            score = max(risk, self.carry_decay * score)
+        else:
+            score = score * (self.carry_safe_keep + (1.0 - self.carry_safe_keep) * risk)
+        self._carried_risk = min(1.0, max(0.0, score))
+
+    def carried_risk(self) -> float:
+        """Risk carried over from the earlier turns of this chat (0 until a turn is blocked)."""
+        return round(self._carried_risk, 4)
 
     def recent_turns(self, limit: int = 5) -> list[dict]:
         return [dict(turn) for turn in list(self._turns)[-limit:]]
@@ -87,6 +132,7 @@ class SessionMemory:
             "transitions": transitions,
             "blocked_turns": blocked,
             "session_risk_score": risk,
+            "carried_risk": self.carried_risk(),
             "session_summary": (
                 f"{self.turn_count} turns, {blocked} blocked. Session risk {risk:.0%}. "
                 f"Intent sequence: {', '.join(intents) or 'none'}."

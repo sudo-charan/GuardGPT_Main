@@ -71,6 +71,16 @@ STATUS_FOR_OUTCOME = {
 }
 
 
+def _carried_only_block(guard, jev, decision) -> bool:
+    """True when the carried-risk rule alone turned this turn into a BLOCK.
+
+    The rule only upgrades a JEV FLAG, so without a Layer 1 UNSAFE verdict the
+    block came from carried risk and must not raise the carried risk again.
+    """
+    return (decision.action == BLOCK and "escalated_carried_risk" in jev.rationale
+            and guard.status != "UNSAFE")
+
+
 class AuditLog:
     """Compact security-event log: identifiers and verdicts, no prompt text."""
 
@@ -204,7 +214,7 @@ class CompletePipeline:
 
     def session_report(self, session_id, request_id="session_query"):
         memory = self.memories.get(session_id) if session_id else None
-        return memory.report(session_id, request_id) if memory else None
+        return memory.report(session_id, request_id) if memory is not None else None
 
     # --------------------------------------------------------------------- run
     def run(self, prompt, session_id=None, check_only=False, request_id=None):
@@ -217,7 +227,9 @@ class CompletePipeline:
         report = dict(
             trace_id=trace_id, request_id=request_id, audit_id=uuid.uuid4().hex,
             timestamp=datetime.now(timezone.utc).isoformat(), session_id=session_id,
-            prompt=prompt if isinstance(prompt, str) else "", mode="check" if check_only else "answer",
+            # Redacted from the start, so a prompt that never passes Layer 1 (over-long input,
+            # a Layer 1 failure) is not logged with its personal data.
+            prompt=redact(prompt).text if isinstance(prompt, str) else "", mode="check" if check_only else "answer",
             action=BLOCK, final_status="ERROR", allowed=False, response=None, user_message="",
             intent="unknown", intent_confidence=0.0, intent_probabilities={}, risk_level="unknown",
             reasons=[], pii_types=[], pii_span_count=0, redacted=False,
@@ -255,7 +267,7 @@ class CompletePipeline:
             emit("error", stage="pipeline", error=type(error).__name__)
 
         memory = self.memories.get(session_id) if session_id else None
-        session_report = memory.report(session_id, request_id) if memory else None
+        session_report = memory.report(session_id, request_id) if memory is not None else None
         timing = trace.as_dict()
         report["timings_ms"], report["duration_ms"] = timing["stages_ms"], timing["total_ms"]
         try:
@@ -272,11 +284,21 @@ class CompletePipeline:
         final_output = dict(report)
         final_output["session_report"] = session_report
         try:
-            if report["action"] == FLAG and report["final_status"] == "REVIEW":
+            # A BLOCK caused only by carried risk is also queued, so a wrong block can be spotted.
+            carried_block = (report["action"] == BLOCK and report["final_status"] == "UNSAFE"
+                             and "jev:escalated_carried_risk" in report["reasons"])
+            # An explicit crisis still gets its support reply at once, and a human is told as well.
+            crisis = (report["final_status"] == "SUPPORT"
+                      and "self_harm_crisis" in ((report.get("layer1_input") or {}).get("findings") or []))
+            if (report["action"] == FLAG and report["final_status"] == "REVIEW") or carried_block or crisis:
                 record = self._review_record(report)
                 record.update(escalation.assess(
-                    record, memory.recent_turns(escalation.REPEAT_WINDOW + 1) if memory else (),
-                    memory.session_risk() if memory else 0.0))
+                    record, memory.recent_turns(escalation.REPEAT_WINDOW + 1) if memory is not None else (),
+                    memory.session_risk() if memory is not None else 0.0))
+                if crisis:
+                    record.update(stage="support", priority="urgent", escalated=True,
+                                  escalation_reasons=list(dict.fromkeys(
+                                      ["crisis_support"] + record.get("escalation_reasons", []))))
                 report["review"] = self.review_queue.enqueue(record)
                 emit("review_queued", review_id=report["review"].get("review_id"),
                      priority=record["priority"], escalated=record["escalated"])
@@ -316,7 +338,7 @@ class CompletePipeline:
             if isinstance(prompt, str) and prompt.strip():
                 clean = redact(prompt)
                 embedding = self.intent_layer.embed(clean.text if clean.detected else prompt)
-            guard = self.input_guard.check(prompt, memory.levels if memory else (), embedding=embedding)
+            guard = self.input_guard.check(prompt, memory.levels if memory is not None else (), embedding=embedding)
         report["layer1_input"] = guard.as_dict()
         report["layer1_input"].pop("redacted_prompt", None)
         emit("security_event", layer="layer1_input", status=guard.status, risk_score=guard.risk_score,
@@ -359,11 +381,14 @@ class CompletePipeline:
 
         # ---------------- JEV model ----------------
         with stage("jev"):
-            jev = self.jev.evaluate(intent, guard, memory.recent_turns() if memory else (),
-                                    prompt=guard.redacted_prompt)
+            carried_risk = memory.carried_risk() if memory is not None else 0.0
+            jev = self.jev.evaluate(intent, guard, memory.recent_turns() if memory is not None else (),
+                                    prompt=guard.redacted_prompt, carried_risk=carried_risk)
         report["jev"] = jev.as_dict()
+        report["jev"]["carried_risk"] = carried_risk
         emit("jev", verdict=jev.verdict, label=jev.label, confidence=jev.confidence,
-             risk_score=jev.risk_score, rationale=jev.rationale, backend=jev.backend)
+             risk_score=jev.risk_score, rationale=jev.rationale, backend=jev.backend,
+             carried_risk=carried_risk)
 
         # ---------------- Layer 3 - guard / policy engine ----------------
         with stage("layer3_policy"):
@@ -377,7 +402,9 @@ class CompletePipeline:
             report["turn_index"] = memory.record_turn(
                 intent=intent.intent, confidence=intent.confidence,
                 action=decision.action, risk_score=decision.risk_score,
-                topic=(topic or {}).get("topic"), embedding=embedding)
+                topic=(topic or {}).get("topic"), embedding=embedding,
+                support=decision.route == "support",
+                carried_escalation=_carried_only_block(guard, jev, decision))
 
         if check_only:
             message = decision.user_message or "Input checks complete; no answer generated."
@@ -399,7 +426,7 @@ class CompletePipeline:
             "self_harm_level": ("distress" if "wellbeing_mode" in decision.reason_codes
                                 and guard.self_harm_level == "none" else guard.self_harm_level),
             "follow_up": (guard.checks.get("self_harm") or {}).get("follow_up"),
-            "history": memory.messages() if memory else [],
+            "history": memory.messages() if memory is not None else [],
             "request_span_digests": span_digests,
             "policy_message": decision.user_message,
             "max_attempts": self.max_attempts,

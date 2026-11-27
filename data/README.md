@@ -30,10 +30,15 @@ If the files are missing, both layers still run without the dataset evidence, an
 ## Antivirus quarantine
 
 Windows Defender has quarantined `guardgpt_dataset.jsonl` and `guardgpt_id_map.json` as
-`Exploit:Python/Leivion.A`. If they disappear, check **Windows Security → Virus & threat
-protection → Protection history** and restore them from there or from your project
-archive. Defender may quarantine them again. Allow the files or exclude this folder only
-if you trust where the dataset came from, since that reduces protection.
+`Exploit:Python/Leivion.A`, several times (25-27 Nov 2026). If they disappear, check
+**Windows Security → Virus & threat protection → Protection history** and restore them
+from there, from your project archive, or with `git checkout -- data/` (the files are in
+the repository). Defender may quarantine them again. Allow the files or exclude this
+folder only if you trust where the dataset came from, since that reduces protection.
+
+While a file is missing, `python main.py --status` reports `"dataset": false`, Layer 1
+and Layer 2 lose their dataset evidence, and the accuracy test
+`test_safe_prompts_are_never_blocked` can fail, because results differ without it.
 
 The index uses the normalized 384-dimensional embeddings from
 `all-MiniLM-L6-v2`. Do not edit, regenerate, or reorder these artifacts without
@@ -55,3 +60,10 @@ the FAISS index and id map together.
 The dataset vote can lean heavily towards `self_harm_risk` on everyday messages. In a test
 chat on 2026-11-25, "I am feeling a little bored today" received a dataset vote of 100%
 `self_harm_risk`.
+
+## Evaluation prompts
+
+The labelled prompts used to measure accuracy are not in this folder: they are in
+`tests/data/intent_samples.json` (119 prompts in three sets: `tuning` 47, `holdout` 37 and
+`fresh` 35, which was never used for tuning). None of them is in this dataset, and only
+"hello" (in `tuning`) also appears in `intent_classifier/intent_anchors.json`.
